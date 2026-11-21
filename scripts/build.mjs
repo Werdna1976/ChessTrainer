@@ -33,11 +33,18 @@ for (const volume of 'abcde') {
 await writeFile('dist/opening-book.json', JSON.stringify(Object.fromEntries(positions)));
 await copyFile('data/openings/COPYING.txt', 'dist/vendor/chess-openings-LICENSE.txt');
 
-let html = await readFile('dist/index.html', 'utf8');
-for (const file of ['styles.css', 'theme.js', 'app.js']) {
+async function versionedPath(file) {
   const bytes = await readFile('dist/' + file);
   const version = createHash('sha256').update(bytes).digest('hex').slice(0, 12);
-  html = html.replace('./' + file + '"', './' + file + '?v=' + version + '"');
+  return './' + file + '?v=' + version;
+}
+
+const app = await readFile('dist/app.js', 'utf8');
+await writeFile('dist/app.js', app.replace("'./engine.js'", "'" + await versionedPath('engine.js') + "'"));
+
+let html = await readFile('dist/index.html', 'utf8');
+for (const file of ['styles.css', 'theme.js', 'app.js']) {
+  html = html.replace('./' + file + '"', await versionedPath(file) + '"');
 }
 await writeFile('dist/index.html', html);
 console.log('Built static site in dist/');

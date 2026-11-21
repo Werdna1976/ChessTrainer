@@ -1,5 +1,5 @@
 import { Chess } from './vendor/chess.js';
-import { Engine, levels, uci, pieceNames, assess, explain, formatScore, boardLine, describeMove } from './engine.js';
+import { Engine, levels, uci, pieceNames, assess, explain, formatScore, boardLine, describeMove, moveImpact } from './engine.js';
 import { openings, challenges } from './content.js';
 import { boards, sets, pieceArt, loadAppearance, saveAppearance, playMoveSound } from './appearance.js';
 import { openingPositionKey } from './book.js';
@@ -47,8 +47,10 @@ let hintOn = false;
 let reviewId = library.current.id;
 let reviewPly = 0;
 let reviewRetry = null;
+let livePly = null;
 let toast = '';
 let openingBook = {};
+const scoring = new Map();
 
 function reconstruct(record, limit = record.moves.length) {
   const position = new Chess();
@@ -127,7 +129,10 @@ function enterMode(next) {
   selected = '';
   variation = null;
   reviewRetry = null;
-  if (next === 'play') facing = library.current.color;
+  if (next === 'play') {
+    facing = library.current.color;
+    livePly = null;
+  }
   if (next === 'challenges') {
     if (!(exercise instanceof Chess) || exerciseMode !== next) resetExercise();
     facing = 'w';
@@ -180,6 +185,10 @@ function boardContext() {
     return { position, last: position.history({ verbose: true }).at(-1) };
   }
   if (mode === 'play') {
+    if (livePly !== null) {
+      const position = reconstruct(library.current, livePly);
+      return { position, last: position.history({ verbose: true }).at(-1) };
+    }
     const candidate = activeCandidate();
     if (candidate) return { position: new Chess(candidate.move.after), last: candidate.move };
     return { position: game, last: game.history({ verbose: true }).at(-1) };
@@ -192,7 +201,7 @@ function boardContext() {
 function canMove() {
   if (variation) return false;
   if (mode === 'review') return Boolean(reviewRetry && !reviewRetry.move);
-  if (mode === 'play') return !busy && !proposal && playerTurn();
+  if (mode === 'play') return livePly === null && !busy && !proposal && playerTurn();
   return mode === 'challenges' ? exerciseStep < 2 : exerciseStep < openings[openingIndex].moves.length;
 }
 
@@ -201,7 +210,7 @@ function renderBoard() {
   const interactive = canMove();
   const legal = interactive && selected ? position.moves({ square: selected, verbose: true }).map((move) => move.to) : [];
   const board = position.board();
-  const original = mode === 'play' ? proposal?.move : null;
+  const original = mode === 'play' && livePly === null ? proposal?.move : null;
   const originalSquares = original ? [original.from, original.to] : [];
   const onOriginalMove = last && original && last.before === original.before && uci(last) === uci(original);
   const lastSquares = last && !onOriginalMove ? [last.from, last.to] : [];
@@ -251,6 +260,7 @@ function render() {
   $('subtitle').textContent = subtitle;
   $('header-action').textContent = action;
   $('header-action').disabled = mode === 'review' && !getReview().moves.length;
+  $('details').classList.toggle('move-tracker', mode === 'play' || mode === 'review');
   $('difficulty-control').hidden = mode !== 'play';
   syncDifficulty($('difficulty'), $('difficulty-level'), library.current.level);
   for (const link of document.querySelectorAll('[data-mode]')) {
@@ -282,20 +292,72 @@ function bookBadge(move) {
 function moveList(list, notes = {}, active = -1) {
   if (!list.length) return '<p class="muted">Moves will appear here as you play.</p>';
   const rows = list.map((move, index) => {
-    const grade = notes[index + 1]?.grade;
+    const note = notes[index + 1];
+    const impact = moveImpact(note);
     const entry = bookEntry(move);
     const [eco, name] = entry || [];
     const book = entry ? '<span class="book-cell" title="' + escape(name ? name + ' · ' + eco : 'Book move') + '">'
-      + escape(name ? name.split(':')[0] : 'In book') + '</span>' : '';
-    return '<tr><td>' + (Math.floor(index / 2) + 1) + (index % 2 === 0 ? '.' : '…') + '</td><td>'
-      + '<button data-action="' + (mode === 'play' ? 'review-live' : 'review-ply') + '" data-value="' + (index + 1) + '" class="' + (index + 1 === active ? 'current' : '') + '" aria-label="'
-      + escape(playerName(move.color) + ' played ' + move.san + (grade ? ', ' + grade : '')) + '">' + escape(move.san)
-      + (grade ? '<span class="badge ' + gradeStyle(grade) + '" title="' + escape(grade) + '"></span>' : '') + '</button></td><td>' + book + '</td></tr>';
+      + escape(name || 'In book') + '</span>' : '';
+    const activeRow = index + 1 === active;
+    return '<tr data-ply="' + (index + 1) + '"' + (activeRow ? ' class="current"' : '') + '><td>' + (Math.floor(index / 2) + 1) + (index % 2 === 0 ? '.' : '…') + '</td><td>'
+      + '<button data-action="timeline" data-value="' + (index + 1) + '"' + (activeRow ? ' aria-current="step"' : '') + ' aria-label="'
+      + escape(playerName(move.color) + ' played ' + move.san + (note?.grade ? ', ' + note.grade : '')) + '">' + escape(move.san)
+      + '</button></td><td>' + (impact
+        ? '<span class="badge ' + impact.tone + '" title="' + escape(note.grade + ' · ' + playerName(move.color) + '’s evaluation change') + '">' + escape(impact.label) + '</span>'
+        : '<span class="muted" title="Awaiting analysis">—</span>') + '</td><td>' + book + '</td></tr>';
   });
-  return '<div class="moves"><table aria-label="Moves and opening book"><thead><tr><th scope="col">Turn</th><th scope="col">Move</th><th scope="col">Book</th></tr></thead>'
+  return '<div class="moves"><table aria-label="Move tracker"><colgroup><col class="turn-col"><col class="move-col"><col class="impact-col"><col></colgroup>'
+    + '<thead><tr><th scope="col">Turn</th><th scope="col">Move</th><th scope="col" title="Evaluation change for the side that moved">Change</th><th scope="col">Book</th></tr></thead>'
     + '<tbody>' + rows.join('') + '</tbody></table></div>';
 }
 
+function renderTracker(record, list, cursor, heading) {
+  const details = $('details');
+  const previousScroll = cursor ? details.querySelector('.moves')?.scrollTop || 0 : 0;
+  const focused = details.contains(document.activeElement) ? document.activeElement : null;
+  const end = list.length;
+  const following = mode === 'play' && livePly === null;
+  const pending = list.filter((_, index) => !moveImpact(record.notes[index + 1])).length;
+  const job = scoring.get(record);
+  const navigation = end ? '<div class="timeline-controls" aria-label="Game timeline">'
+    + '<label for="timeline-position">' + (following ? 'Live position' : cursor ? 'After ' + Math.ceil(cursor / 2) + (cursor % 2 ? '. ' : '… ') + escape(list[cursor - 1].san) : 'Starting position') + '</label>'
+    + '<input id="timeline-position" type="range" min="0" max="' + end + '" value="' + cursor + '">'
+    + '<div class="timeline-buttons">'
+    + button('timeline', 'Start', 'secondary', 0, cursor === 0)
+    + button('timeline', 'Back', 'secondary', cursor - 1, cursor === 0)
+    + button('timeline', 'Next', 'secondary', cursor + 1, cursor === end)
+    + (mode === 'play' ? button('timeline', 'Live', 'secondary', 'live', following) : button('timeline', 'End', 'secondary', end, cursor === end))
+    + '</div></div>' : '';
+  details.innerHTML = heading + navigation + moveList(list, record.notes, cursor)
+    + (end ? '<div class="tracker-footer"><p class="muted">Change is shown for the side that moved.</p>'
+      + (pending ? (job?.running ? '<p role="status">Scoring moves… ' + (end - pending) + ' of ' + end + '</p>'
+        : button('score-game', job?.failed ? 'Retry scoring' : 'Analyze game', 'secondary')) : '') + '</div>' : '');
+  const scroll = details.querySelector('.moves');
+  if (scroll) {
+    scroll.scrollTop = previousScroll;
+    const row = scroll.querySelector('tr.current');
+    if (row) {
+      const view = scroll.getBoundingClientRect();
+      const bounds = row.getBoundingClientRect();
+      const header = scroll.querySelector('thead').offsetHeight;
+      if (bounds.top < view.top + header) scroll.scrollTop -= view.top + header - bounds.top;
+      if (bounds.bottom > view.bottom) scroll.scrollTop += bounds.bottom - view.bottom;
+    }
+  }
+  if (focused?.id) details.querySelector('#' + focused.id)?.focus({ preventScroll: true });
+  else if (focused?.dataset.action === 'timeline') {
+    const replacement = [...details.querySelectorAll('button[data-action="timeline"]')].find((control) =>
+      !control.disabled && (focused.closest('table') ? control.closest('table') && control.dataset.value === focused.dataset.value : control.textContent === focused.textContent));
+    (replacement || details.querySelector('#timeline-position'))?.focus({ preventScroll: true });
+  }
+}
+
+function scoreSummary(note, color) {
+  const impact = moveImpact(note);
+  if (!impact) return '';
+  return '<p class="evaluation-summary"><span class="badge ' + impact.tone + '">' + escape(impact.label) + '</span> '
+    + playerName(color) + '’s evaluation went from ' + escape(formatScore(note.best)) + ' to ' + escape(formatScore(note.line)) + '.</p>';
+}
 function variationControls() {
   const move = variation.moves[variation.index - 1];
   const next = variation.moves[variation.index];
@@ -311,14 +373,27 @@ function noteCopy(note) {
     + (note.risks.length ? '<h3>What your opponent might play</h3>' + note.risks.map((item) => '<p>' + escape(item) + '</p>').join('') : '');
 }
 
+function recordedMoveCopy(record, played, ply) {
+  const note = record.notes[ply];
+  return '<div class="card-head"><h2>' + Math.ceil(ply / 2) + (played.color === 'w' ? '. ' : '… ') + escape(played.san) + '</h2>'
+    + (note ? '<span class="badge ' + gradeStyle(note.grade) + '">' + escape(note.grade) + '</span>' : '') + '</div>'
+    + bookBadge(played) + scoreSummary(note, played.color)
+    + (note && played.color === record.color ? noteCopy(note) : '<p class="muted">' + playerName(played.color) + ' played ' + escape(played.san) + '.</p>');
+}
+
 function renderPlay() {
   const focusedCandidate = document.activeElement?.dataset.action === 'option' ? document.activeElement.dataset.value : null;
-  const notes = library.current.notes;
+  const record = library.current;
+  const list = game.history({ verbose: true });
   const candidate = activeCandidate();
   const proposed = candidate?.move;
   const note = candidate?.note;
   let panel = '<p class="kicker">Position coach</p>';
-  if (proposed) {
+  if (livePly !== null) {
+    const played = list[livePly - 1];
+    panel = '<p class="kicker">Game replay</p>' + (played ? recordedMoveCopy(record, played, livePly) : '<h2>Starting position</h2>')
+      + buttons(button('timeline', 'Return to live game', 'primary', 'live') + button('review-live', 'Open game review', 'secondary', livePly));
+  } else if (proposed) {
     if (proposal.choices.length) {
       panel += '<h2>Compare moves</h2><div class="lines candidates" role="group" aria-label="Moves to compare">';
       for (const [index, option] of [proposal, ...proposal.choices].entries()) {
@@ -352,12 +427,8 @@ function renderPlay() {
   }
   $('panel').innerHTML = panel;
   if (focusedCandidate !== null) $('panel').querySelector('[data-action="option"][data-value="' + focusedCandidate + '"]')?.focus({ preventScroll: true });
-  const list = game.history({ verbose: true });
-  const latest = Object.entries(notes).at(-1);
-  const quality = latest ? '<div class="move-quality"><span>' + escape(list[Number(latest[0]) - 1].san)
-    + '</span><span class="badge ' + gradeStyle(latest[1].grade) + '">' + escape(latest[1].grade) + '</span></div>' : '';
-  $('details').innerHTML = '<div class="card-head"><h2>Move history</h2>' + (list.length ? button('review-live', 'Review', 'text-button', list.length) : '') + '</div>'
-    + quality + moveList(list, notes);
+  renderTracker(record, list, livePly ?? list.length, '<div class="card-head"><h2>Move tracker</h2>'
+    + (list.length ? button('review-live', 'Review', 'text-button', livePly ?? list.length) : '') + '</div>');
 }
 
 function renderChallenge() {
@@ -399,21 +470,15 @@ function renderReview() {
   const list = reconstruct(record).history({ verbose: true });
   const played = list[reviewPly - 1];
   const note = record.notes[reviewPly];
-  const grades = Object.values(record.notes).map((item) => item.grade);
   const keyPlies = Object.entries(record.notes).filter(([, item]) => ['Blunder', 'Mistake', 'Inaccuracy', 'Missed mate'].includes(item.grade)).map(([ply]) => Number(ply));
   let copy = '<p class="kicker">Analysis board</p>';
   if (played) {
-    copy += '<div class="card-head"><h2>' + Math.ceil(reviewPly / 2) + (played.color === 'w' ? '. ' : '… ') + escape(played.san) + '</h2>'
-      + (note ? '<span class="badge ' + gradeStyle(note.grade) + '">' + escape(note.grade) + '</span>' : '') + '</div>';
-    copy += bookBadge(played);
-    copy += note ? noteCopy(note) || '<p class="muted">Explore the engine line to see what follows.</p>' : '<p class="muted">' + playerName(played.color) + ' played ' + escape(played.san) + '.</p>';
-    if (note && !variation) copy += buttons((note.line?.moves.length > 1 ? button('review-line', 'Show opponent’s reply', 'secondary', 'line') : '')
+    copy += recordedMoveCopy(record, played, reviewPly);
+    if (note && !variation) copy += buttons((note.line?.moves.length > 1 ? button('review-line', 'Show reply', 'secondary', 'line') : '')
       + (note.best && note.best.moves[0] !== uci(played) ? button('review-line', 'See alternative', 'secondary', 'best') : '')
       + button('review-retry', 'Retry position'));
   } else copy += '<h2>Starting position</h2><p class="muted">' + (list.length ? 'Step through the moves or jump to a turning point.' : 'Play a game to build your review history.') + '</p>';
   if (variation) copy += variationControls();
-  else copy += buttons(button('review-ply', 'First', 'secondary', 0, !reviewPly) + button('review-ply', 'Back', 'secondary', reviewPly - 1, !reviewPly)
-    + button('review-ply', 'Next', 'secondary', reviewPly + 1, reviewPly === list.length) + button('review-ply', 'Last', 'secondary', list.length, reviewPly === list.length));
   if (keyPlies.length) {
     const next = keyPlies.find((ply) => ply > reviewPly) ?? keyPlies[0];
     copy += buttons(button('review-ply', 'Next turning point', 'primary', next));
@@ -434,8 +499,8 @@ function renderReview() {
     if (variation) copy += variationControls();
     copy += buttons((attempt.move && (attempt.note || attempt.error) ? button('review-retry', 'Try another move') : '') + button('retry-close', 'Back to game'));
   }
-  $('panel').innerHTML = copy;
-  const habit = Object.values(record.notes).filter((item) => ['Blunder', 'Mistake', 'Inaccuracy', 'Missed mate'].includes(item.grade)).reduce((counts, item) => {
+  const ownMistakes = keyPlies.filter((ply) => list[ply - 1].color === record.color);
+  const habit = ownMistakes.map((ply) => record.notes[ply]).reduce((counts, item) => {
     if (item.tag) counts[item.tag] = (counts[item.tag] || 0) + 1;
     return counts;
   }, {});
@@ -445,12 +510,19 @@ function renderReview() {
     'King safety': 'Before attacking, look at every check your opponent can play on the next move.',
     'Forcing replies': 'Look at your opponent’s checks and captures first. Play through the strongest one in your head.',
   };
-  $('details').innerHTML = '<h2>Game history</h2><label class="field">Choose a game<select id="review-game">'
+  if (!reviewRetry) {
+    const ownGrades = list.flatMap((move, index) => move.color === record.color && record.notes[index + 1] ? [record.notes[index + 1].grade] : []);
+    if (ownGrades.length) copy += '<div class="actions" aria-label="Your move quality"><span class="badge good">'
+      + ownGrades.filter((grade) => ['Good move', 'Checkmate'].includes(grade)).length + ' good</span><span class="badge mistake">'
+      + ownGrades.filter((grade) => grade === 'Mistake').length + ' mistakes</span><span class="badge blunder">'
+      + ownGrades.filter((grade) => grade === 'Blunder').length + ' blunders</span></div>';
+  }
+  if (ownMistakes.length && !reviewRetry) copy += '<div class="tip"><strong>For your next game</strong><p>' + (tips[theme] || 'Pause before committing and compare at least two candidate moves after each likely reply.') + '</p></div>';
+  $('panel').innerHTML = copy;
+  renderTracker(record, list, reviewPly, '<h2>Game review</h2><label class="field">Choose a game<select id="review-game">'
     + [library.current, ...library.archive].map((item, index) => '<option value="' + escape(item.id) + '"' + (item.id === record.id ? ' selected' : '') + '>'
       + escape(index ? dateLabel(item) + ' · ' + playerName(item.color) + ' · ' + item.moves.length + ' plies' : 'Current game') + '</option>').join('')
-    + '</select></label>' + (grades.length ? '<div class="actions"><span class="badge good">' + grades.filter((grade) => ['Good move', 'Checkmate'].includes(grade)).length + ' good</span><span class="badge mistake">' + grades.filter((grade) => grade === 'Mistake').length + ' mistakes</span><span class="badge blunder">' + grades.filter((grade) => grade === 'Blunder').length + ' blunders</span></div>' : '')
-    + moveList(list, record.notes, reviewPly)
-    + (keyPlies.length ? '<div class="tip"><strong>For your next game</strong><p>' + (tips[theme] || 'Pause before committing and compare at least two candidate moves after each likely reply.') + '</p></div>' : '');
+    + '</select></label>');
 }
 
 function prepareProposal(move) {
@@ -459,19 +531,66 @@ function prepareProposal(move) {
   void analyzeProposal();
 }
 
-async function evaluateMove(move, history) {
-  const after = new Chess(move.after);
-  const candidates = await engine.search({ history, count: 3, ms: 510 });
+async function evaluateMove(move, history, { fast = false, after = new Chess(move.after) } = {}) {
+  const candidates = await engine.search({ history, count: fast ? 1 : 3, ms: fast ? 200 : 510 });
   const best = candidates.lines[0];
   if (!best) throw new Error('No evaluation available.');
   let chosen = candidates.lines.find((item) => item.moves[0] === uci(move));
-  if (after.isGameOver() && !after.isCheckmate()) chosen = { type: 'cp', score: 0, moves: [uci(move)] };
+  if (after.isCheckmate()) chosen = { type: 'mate', score: 1, moves: [uci(move)] };
+  else if (after.isDraw()) chosen = { type: 'cp', score: 0, moves: [uci(move)] };
   else if (!chosen) {
-    const forced = await engine.search({ history, restrict: uci(move), ms: 450 });
+    const forced = await engine.search({ history, restrict: uci(move), ms: fast ? 190 : 450 });
     chosen = forced.lines[0];
   }
   const note = { ...explain(move, chosen), grade: assess(chosen, best, after.isCheckmate()), line: chosen, best };
   return { note, candidates: candidates.lines };
+}
+
+function refreshScores(record) {
+  if ($('timeline-position')?.matches(':active')) return;
+  if (mode === 'play' && library.current === record) renderPlay();
+  if (mode === 'review' && getReview() === record) renderReview();
+}
+
+function scoreMoves(record, plies) {
+  const job = scoring.get(record) || { queue: new Set(), running: false, failed: false };
+  for (const ply of plies) {
+    if (!moveImpact(record.notes[ply])) job.queue.add(ply);
+  }
+  if (!job.queue.size) return;
+  scoring.set(record, job);
+  if (!job.running) void runScoring(record, job);
+}
+
+async function runScoring(record, job) {
+  job.running = true;
+  job.failed = false;
+  refreshScores(record);
+  const retained = () => record === library.current || library.archive.includes(record);
+  try {
+    while (job.queue.size && retained()) {
+      const ply = job.queue.values().next().value;
+      if (!moveImpact(record.notes[ply])) {
+        const after = reconstruct(record, ply);
+        const move = after.history({ verbose: true }).at(-1);
+        const { note } = await evaluateMove(move, record.moves.slice(0, ply - 1), { fast: true, after });
+        if (!moveImpact(note)) throw new Error('Stockfish did not score the move.');
+        if (retained()) {
+          record.notes[ply] = note;
+          save();
+        }
+      }
+      job.queue.delete(ply);
+      if (retained() && job.queue.size) refreshScores(record);
+    }
+  } catch {
+    job.failed = true;
+    job.queue.clear();
+  } finally {
+    job.running = false;
+    if (!job.failed || !retained()) scoring.delete(record);
+    if (retained()) refreshScores(record);
+  }
 }
 
 async function analyzeProposal() {
@@ -516,6 +635,7 @@ function commit() {
   if (!proposal) return;
   const { move, note } = activeCandidate();
   const recorded = game.move(uci(move));
+  const record = library.current;
   soundFor(recorded);
   library.current.moves.push(uci(recorded));
   library.current.notes[library.current.moves.length] = note || {
@@ -525,6 +645,7 @@ function commit() {
   save();
   render();
   void playOpponent();
+  scoreMoves(record, [record.moves.length]);
 }
 
 function clearProposal() {
@@ -549,6 +670,7 @@ async function playOpponent() {
     soundFor(move);
     library.current.moves.push(uci(move));
     save();
+    scoreMoves(library.current, [library.current.moves.length]);
     announce('Stockfish played ' + move.san + '.');
   } catch {
     if (opponentRequest === request) engineError = 'Stockfish couldn’t play its move. Try again.';
@@ -736,6 +858,18 @@ const actions = {
   challenge(index) { challengeIndex = Number(index); resetExercise(); },
   opening(index) { openingIndex = Number(index); resetExercise(); },
   'review-live'(index) { reviewId = library.current.id; reviewPly = Number(index); goTo('review'); },
+  timeline(value) {
+    if (mode === 'review') actions['review-ply'](value);
+    else {
+      livePly = value === 'live' ? null : Math.max(0, Math.min(Number(value), library.current.moves.length));
+      variation = null;
+      selected = '';
+    }
+  },
+  'score-game'() {
+    const record = mode === 'review' ? getReview() : library.current;
+    scoreMoves(record, record.moves.map((_, index) => index + 1));
+  },
   'review-ply'(index) {
     reviewPly = Math.max(0, Math.min(Number(index), getReview().moves.length));
     variation = null;
@@ -776,6 +910,7 @@ const actions = {
     game = reconstruct(library.current);
     reviewId = library.current.id;
     reviewPly = 0;
+    livePly = null;
     opponentRequest = 0;
     engineError = '';
     clearProposal();
@@ -795,6 +930,7 @@ const actions = {
       game = reconstruct(library.current);
       reviewId = library.current.id;
       reviewPly = 0;
+      livePly = null;
       opponentRequest = 0;
       engineError = '';
       clearProposal();
@@ -813,7 +949,14 @@ document.addEventListener('click', (event) => {
   const square = event.target.closest('[data-square]');
   if (square) { chooseSquare(square.dataset.square); return; }
   const control = event.target.closest('[data-action]');
-  if (!control) return;
+  if (!control) {
+    const row = event.target.closest('tr[data-ply]');
+    if (row) {
+      actions.timeline(row.dataset.ply);
+      render();
+    }
+    return;
+  }
   if (control.dataset.action !== 'restore') toast = '';
   actions[control.dataset.action]?.(control.dataset.value, control);
   render();
@@ -827,6 +970,10 @@ document.addEventListener('input', ({ target }) => {
   if (target.id === 'game-level') syncDifficulty(target, $('game-level-label'), levels[target.valueAsNumber].id);
 });
 document.addEventListener('change', ({ target }) => {
+  if (target.id === 'timeline-position') {
+    actions.timeline(target.value);
+    render();
+  }
   if (target.id === 'move-sounds') {
     appearance.sound = target.checked;
     saveAppearance(appearance);
@@ -871,13 +1018,20 @@ $('header-action').addEventListener('click', () => {
 });
 window.addEventListener('hashchange', () => enterMode(location.hash.slice(1)));
 window.addEventListener('keydown', (event) => {
-  if (mode !== 'review' || (reviewRetry && !variation) || $('dialog').open || event.target instanceof HTMLSelectElement || !['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+  if (!['play', 'review'].includes(mode) || (reviewRetry && !variation) || $('dialog').open
+    || event.target instanceof HTMLSelectElement || event.target instanceof HTMLInputElement
+    || !['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+  const step = event.key === 'ArrowRight' ? 1 : -1;
+  if (mode === 'play' && !variation && (!library.current.moves.length || (livePly === null && step > 0))) return;
   event.preventDefault();
-  if (variation) actions['line-step'](variation.index + (event.key === 'ArrowRight' ? 1 : -1));
-  else actions['review-ply'](reviewPly + (event.key === 'ArrowRight' ? 1 : -1));
+  if (variation) actions['line-step'](variation.index + step);
+  else actions.timeline((mode === 'review' ? reviewPly : livePly ?? library.current.moves.length) + step);
   render();
 });
 
+new ResizeObserver(([board]) => {
+  $('details').style.setProperty('--board-height', board.contentRect.height + 'px');
+}).observe($('board'));
 enterMode(location.hash.slice(1));
 void playOpponent();
 fetch(new URL('./opening-book.json', import.meta.url))

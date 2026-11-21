@@ -6,6 +6,8 @@ Open **Appearance** to mix and match board palettes and piece sets or mute the m
 
 The review board preserves the coach’s notes, highlights turning points, and lets you retry a position from your own game. The training library includes four puzzles and practice lines for the French Defense, Sicilian Defense, London System, and Italian Game.
 
+Use the move tracker to click a move, scrub the timeline, or step with the left and right arrow keys. **Live** returns to the current position in Coach & Play. The **Change** column compares Stockfish’s estimate for the move played with its estimate before the move, from the perspective of the side that moved. Use **Analyze game** to fill in missing scores from older games.
+
 ## Run locally
 
 With Node.js 24 or newer installed, run these commands from the project directory.

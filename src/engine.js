@@ -166,3 +166,23 @@ export function formatScore(line) {
   if (line.type === 'mate') return (line.score < 0 ? '−' : '+') + 'M' + Math.abs(line.score);
   return (line.score >= 0 ? '+' : '−') + (Math.abs(line.score) / 100).toFixed(2);
 }
+
+export function moveImpact(note) {
+  const { best: before, line: after } = note || {};
+  if (!before || !after) return null;
+  if (before.type === 'cp' && after.type === 'cp') {
+    const change = after.score - before.score;
+    return {
+      label: formatScore({ type: 'cp', score: change }),
+      tone: change <= -160 ? 'blunder' : change <= -50 ? 'mistake' : 'good',
+    };
+  }
+  if (before.type === 'mate' && before.score > 0 && (after.type !== 'mate' || after.score < 0)) {
+    return { label: 'Missed mate', tone: 'blunder' };
+  }
+  if (after.type === 'mate' && after.score < 0 && (before.type !== 'mate' || before.score >= 0)) {
+    return { label: 'Allows mate', tone: 'blunder' };
+  }
+  if (after.type === 'mate') return { label: formatScore(after), tone: after.score > 0 ? 'good' : 'mistake' };
+  return { label: 'Avoids mate', tone: 'good' };
+}
