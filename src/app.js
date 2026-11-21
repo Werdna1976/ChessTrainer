@@ -1,6 +1,7 @@
 import { Chess } from './vendor/chess.js';
 import { Engine, levels, uci, pieceNames, assess, explain, formatScore, boardLine } from './engine.js';
 import { openings, challenges } from './content.js';
+import { boards, sets, pieceArt, loadAppearance, saveAppearance, playMoveSound } from './appearance.js';
 
 const $ = (id) => document.getElementById(id);
 const escape = (input) => String(input ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
@@ -9,8 +10,11 @@ const button = (action, label, style = 'secondary', value = '', disabled = false
   '<button class="' + style + '" data-action="' + action + '" data-value="' + escape(value) + '"' + (disabled ? ' disabled' : '') + '>' + escape(label) + '</button>';
 const playerName = (color) => color === 'w' ? 'White' : 'Black';
 const squares = 'abcdefgh';
-const glyph = { p: '♟', n: '♞', b: '♝', r: '♜', q: '♛', k: '♚' };
+// Keep the existing key so history survives the site rename.
 const storeKey = 'quiet-square-v1';
+const appearance = loadAppearance();
+document.documentElement.dataset.board = appearance.board;
+document.documentElement.dataset.pieces = appearance.pieces;
 const engine = new Engine();
 const modes = {
   play: ['Coach & play', 'Explore a move before you commit to it.', 'New game'],
@@ -92,6 +96,16 @@ function announce(message) { $('announcement').textContent = message; }
 function getReview() { return [library.current, ...library.archive].find((record) => record.id === reviewId) || library.current; }
 function playerTurn() { return !game.isGameOver() && game.turn() === library.current.color; }
 function engineLevel() { return levels.find((level) => level.id === library.current.level); }
+function soundFor(move, delay = 0) {
+  if (appearance.sound) void playMoveSound(move, delay);
+}
+
+function syncDifficulty(input, label, levelId) {
+  const index = levels.findIndex((level) => level.id === levelId);
+  input.value = index;
+  input.setAttribute('aria-valuetext', levels[index].label);
+  label.textContent = levels[index].label;
+}
 function resultText(position) {
   if (position.isCheckmate()) return playerName(position.turn() === 'w' ? 'b' : 'w') + ' wins by checkmate.';
   if (position.isStalemate()) return 'Draw by stalemate.';
@@ -191,7 +205,7 @@ function renderBoard() {
       piece?.type === 'k' && piece.color === position.turn() && position.isCheck() ? 'check' : '',
     ].join(' ');
     const label = square + (piece ? ', ' + playerName(piece.color) + ' ' + pieceNames[piece.type] : ', empty');
-    const pieceHtml = piece ? '<span class="piece ' + (piece.color === 'w' ? 'white' : 'black') + '" aria-hidden="true">' + glyph[piece.type] + '</span>' : '';
+    const pieceHtml = piece ? pieceArt(piece.type, piece.color, appearance.pieces) : '';
     return '<button class="square ' + classes + '" data-square="' + square + '" draggable="' + Boolean(canMove() && piece?.color === position.turn()) + '" aria-label="' + label + '"' + (canMove() ? ' aria-pressed="' + (selected === square) + '"' : ' disabled') + '>'
       + (j === 0 ? '<span class="coordinate rank">' + (8 - row) + '</span>' : '')
       + pieceHtml + (i === 7 ? '<span class="coordinate file">' + squares[col] + '</span>' : '') + '</button>';
@@ -213,6 +227,8 @@ function render() {
   $('subtitle').textContent = subtitle;
   $('header-action').textContent = action;
   $('header-action').disabled = mode === 'review' && !getReview().moves.length;
+  $('difficulty-control').hidden = mode !== 'play';
+  syncDifficulty($('difficulty'), $('difficulty-level'), library.current.level);
   for (const link of document.querySelectorAll('[data-mode]')) {
     if (link.dataset.mode === mode) link.setAttribute('aria-current', 'page');
     else link.removeAttribute('aria-current');
@@ -293,8 +309,11 @@ function renderPlay() {
   }
   $('panel').innerHTML = panel;
   const list = game.history({ verbose: true });
-  $('details').innerHTML = '<div class="card-head"><h2>Move history</h2>' + (list.length ? button('review-live', 'Review', 'text-button', list.length) : '') + '</div>' + moveList(list, notes)
-    + '<label class="field">Opponent difficulty<select id="difficulty">' + levels.map((level) => '<option value="' + level.id + '"' + (level.id === library.current.level ? ' selected' : '') + '>' + level.label + '</option>').join('') + '</select></label>';
+  const latest = Object.entries(notes).at(-1);
+  const quality = latest ? '<div class="move-quality"><span>' + escape(list[Number(latest[0]) - 1].san)
+    + '</span><span class="badge ' + gradeStyle(latest[1].grade) + '">' + escape(latest[1].grade) + '</span></div>' : '';
+  $('details').innerHTML = '<div class="card-head"><h2>Move history</h2>' + (list.length ? button('review-live', 'Review', 'text-button', list.length) : '') + '</div>'
+    + quality + moveList(list, notes);
 }
 
 function renderChallenge() {
@@ -449,6 +468,7 @@ function commit(option) {
   if (!proposal) return;
   const { move, note } = option || proposal;
   const recorded = game.move(uci(move));
+  soundFor(recorded);
   library.current.moves.push(uci(recorded));
   library.current.notes[library.current.moves.length] = note || {
     ...explain(recorded), grade: recorded.san.endsWith('#') ? 'Checkmate' : 'Unrated', line: null, best: null,
@@ -478,6 +498,7 @@ async function playOpponent() {
     const { best } = await engine.search({ history, skill: level.skill, ms: level.ms });
     if (opponentRequest !== request) return;
     const move = game.move(best);
+    soundFor(move);
     library.current.moves.push(uci(move));
     save();
     announce('Stockfish played ' + move.san + '.');
@@ -499,10 +520,10 @@ function playChallenge(move) {
     exerciseMessage = 'Try another move. Look for a reply you can force.';
     return;
   }
-  exercise.move(uci(move));
+  soundFor(exercise.move(uci(move)));
   hintOn = false;
   if (exerciseStep === 0 && challenge.reply) {
-    exercise.move(challenge.reply);
+    soundFor(exercise.move(challenge.reply), .13);
     exerciseStep = 1;
     exerciseMessage = 'Black played ' + challenge.reply + '. Find the follow-up.';
     return;
@@ -519,10 +540,10 @@ function playOpening(move) {
     exerciseMessage = move.san + ' is legal. Try the move that fits the plan in this line.';
     return;
   }
-  exercise.move(uci(move));
+  soundFor(exercise.move(uci(move)));
   exerciseStep++;
   const reply = lesson.moves[exerciseStep];
-  if (reply) exercise.move(lesson.moves[exerciseStep++]);
+  if (reply) soundFor(exercise.move(lesson.moves[exerciseStep++]), .13);
   hintOn = false;
   const done = exerciseStep >= lesson.moves.length;
   exerciseMessage = done ? '' : 'You played ' + move.san + (reply ? '. The reply was ' + reply + '.' : '.');
@@ -597,7 +618,7 @@ function download(filename, mime, content) {
 function exportPGN() {
   const record = getReview();
   const position = new Chess();
-  position.setHeader('Event', 'Quiet Square training');
+  position.setHeader('Event', 'Chess Trainer practice');
   position.setHeader('Date', record.date.slice(0, 10).replaceAll('-', '.'));
   position.setHeader('White', record.color === 'w' ? 'Player' : 'Stockfish');
   position.setHeader('Black', record.color === 'b' ? 'Player' : 'Stockfish');
@@ -608,7 +629,7 @@ function exportPGN() {
   }
   const result = position.isCheckmate() ? (position.turn() === 'w' ? '0-1' : '1-0') : (position.isDraw() ? '1/2-1/2' : '*');
   position.setHeader('Result', result);
-  download('quiet-square-' + record.date.slice(0, 10) + '.pgn', 'application/x-chess-pgn', position.pgn({ maxWidth: 78 }));
+  download('chess-trainer-' + record.date.slice(0, 10) + '.pgn', 'application/x-chess-pgn', position.pgn({ maxWidth: 78 }));
 }
 
 function dialog(content) {
@@ -621,8 +642,24 @@ const dismiss = () => $('dialog').close();
 function newGameDialog() {
   dialog('<h2>New game</h2><p class="muted">Choose your side and the opponent’s difficulty.</p>'
     + '<label class="field">Play as<select id="game-color"><option value="w">White</option><option value="b"' + (library.current.color === 'b' ? ' selected' : '') + '>Black</option></select></label>'
-    + '<label class="field">Opponent difficulty<select id="game-level">' + levels.map((level) => '<option value="' + level.id + '"' + (level.id === library.current.level ? ' selected' : '') + '>' + level.label + '</option>').join('') + '</select></label>'
+    + '<div class="difficulty dialog-difficulty"><div class="difficulty-heading"><label for="game-level">Opponent difficulty</label><span id="game-level-label"></span></div>'
+    + '<input id="game-level" type="range" min="0" max="' + (levels.length - 1) + '" step="1"><div class="difficulty-endpoints" aria-hidden="true"><span>Gentle</span><span>Strong</span></div></div>'
     + buttons(button('dismiss', 'Cancel') + button('new-game', 'Start game', 'primary')));
+  syncDifficulty($('game-level'), $('game-level-label'), library.current.level);
+}
+
+function appearanceDialog() {
+  const option = (kind, item, preview) => '<button class="choice appearance-option" data-action="appearance-option" data-kind="' + kind
+    + '" data-value="' + item.id + '" aria-pressed="' + (appearance[kind] === item.id) + '">'
+    + preview + '<span>' + item.name + '</span>' + (item.description ? '<small>' + item.description + '</small>' : '') + '</button>';
+  dialog('<div class="appearance-menu"><h2>Appearance</h2><fieldset><legend>Board</legend><div class="appearance-options">'
+    + boards.map((item) => option('board', item, '<span class="board-swatch" data-board="' + item.id + '" aria-hidden="true"></span>')).join('')
+    + '</div></fieldset><fieldset><legend>Pieces</legend><div class="appearance-options">'
+    + sets.map((item) => option('pieces', item, '<span class="piece-swatch" data-pieces="' + item.id + '">'
+      + pieceArt('n', 'w', item.id) + pieceArt('q', 'b', item.id) + '</span>')).join('')
+    + '</div></fieldset><div class="sound-controls"><label><input id="move-sounds" type="checkbox"' + (appearance.sound ? ' checked' : '')
+    + '> Move sounds</label>' + button('preview-sound', 'Preview sound', 'text-button', '', !appearance.sound) + '</div>'
+    + buttons(button('dismiss', 'Done', 'primary')) + '</div>');
 }
 
 function backupDialog() {
@@ -667,6 +704,16 @@ const actions = {
     openVariation(reconstruct(record, reviewPly - 1).fen(), record.notes[reviewPly]?.[kind]);
   },
   dismiss,
+  'appearance-option'(value, control) {
+    const kind = control.dataset.kind;
+    appearance[kind] = value;
+    document.documentElement.dataset[kind] = value;
+    saveAppearance(appearance);
+    for (const option of $('dialog').querySelectorAll('[data-kind="' + kind + '"]')) {
+      option.setAttribute('aria-pressed', option === control);
+    }
+  },
+  'preview-sound'() { soundFor(); },
   promote(code) {
     const move = boardContext().position.moves({ verbose: true }).find((item) => uci(item) === code);
     dismiss();
@@ -674,7 +721,7 @@ const actions = {
   },
   'new-game'() {
     if (library.current.moves.length) library.archive.unshift(library.current);
-    library.current = newRecord($('game-color').value, $('game-level').value);
+    library.current = newRecord($('game-color').value, levels[$('game-level').valueAsNumber].id);
     game = reconstruct(library.current);
     reviewId = library.current.id;
     reviewPly = 0;
@@ -686,7 +733,7 @@ const actions = {
     dismiss();
     void playOpponent();
   },
-  'save-backup'() { download('quiet-square-backup.json', 'application/json', JSON.stringify(library, null, 2)); },
+  'save-backup'() { download('chess-trainer-backup.json', 'application/json', JSON.stringify(library, null, 2)); },
   async restore() {
     const input = $('restore-file').files[0];
     const message = $('backup-message');
@@ -706,7 +753,7 @@ const actions = {
       enterMode(mode);
       void playOpponent();
     } catch {
-      message.textContent = 'This file could not be read as a Quiet Square backup.';
+      message.textContent = 'This file could not be read as a Chess Trainer backup.';
     }
   },
 };
@@ -717,14 +764,22 @@ document.addEventListener('click', (event) => {
   const control = event.target.closest('[data-action]');
   if (!control) return;
   if (control.dataset.action !== 'restore') toast = '';
-  actions[control.dataset.action]?.(control.dataset.value);
+  actions[control.dataset.action]?.(control.dataset.value, control);
   render();
 });
-document.addEventListener('change', ({ target }) => {
+document.addEventListener('input', ({ target }) => {
   if (target.id === 'difficulty') {
-    library.current.level = target.value;
+    library.current.level = levels[target.valueAsNumber].id;
     save();
     render();
+  }
+  if (target.id === 'game-level') syncDifficulty(target, $('game-level-label'), levels[target.valueAsNumber].id);
+});
+document.addEventListener('change', ({ target }) => {
+  if (target.id === 'move-sounds') {
+    appearance.sound = target.checked;
+    saveAppearance(appearance);
+    $('dialog').querySelector('[data-action="preview-sound"]').disabled = !appearance.sound;
   }
   if (target.id === 'review-game') {
     reviewId = target.value;
@@ -751,6 +806,7 @@ $('board').addEventListener('drop', (event) => {
   moveTo(from, target.dataset.square);
 });
 $('flip').addEventListener('click', () => { facing = facing === 'w' ? 'b' : 'w'; renderBoard(); });
+$('appearance').addEventListener('click', appearanceDialog);
 $('backup').addEventListener('click', backupDialog);
 $('credits').addEventListener('click', () => {
   dialog('<h2>Engine &amp; licenses</h2><p>Stockfish 19 Lite evaluates positions in this browser. Move labels reflect a short search and can change with deeper analysis.</p>'

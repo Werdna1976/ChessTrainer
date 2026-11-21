@@ -1,6 +1,8 @@
-# Quiet Square
+# Chess Trainer
 
-Quiet Square is a desktop-first chess trainer. Play either side against Stockfish at four difficulty settings. Preview your move, compare replies and alternatives, and then make the final call yourself.
+Play either side against Stockfish at four difficulty settings using the slider above the board. Preview your move, compare replies and alternatives, and then make the final call yourself.
+
+Open **Appearance** to mix and match board palettes and piece sets or mute the move sounds. These settings are saved in your browser.
 
 The review board preserves the coach’s notes, highlights turning points, and lets you retry a position from your own game. The training library includes four puzzles and practice lines for the French Defense, Sicilian Defense, London System, and Italian Game.
 
@@ -13,7 +15,7 @@ npm ci
 npm start
 ```
 
-Open [Quiet Square locally](http://127.0.0.1:4173/). The preview server listens only on your computer. Stop it with Ctrl+C.
+Open [Chess Trainer locally](http://127.0.0.1:4173/). The preview server listens only on your computer. Stop it with Ctrl+C.
 
 ## Publish to GitHub Pages
 
