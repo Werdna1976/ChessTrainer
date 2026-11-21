@@ -39,8 +39,12 @@ async function versionedPath(file) {
   return './' + file + '?v=' + version;
 }
 
+const enginePath = await versionedPath('engine.js');
+const review = await readFile('dist/review.js', 'utf8');
+await writeFile('dist/review.js', review.replace("'./engine.js'", "'" + enginePath + "'"));
 const app = await readFile('dist/app.js', 'utf8');
-await writeFile('dist/app.js', app.replace("'./engine.js'", "'" + await versionedPath('engine.js') + "'"));
+await writeFile('dist/app.js', app.replace("'./engine.js'", "'" + enginePath + "'")
+  .replace("'./review.js'", "'" + await versionedPath('review.js') + "'"));
 
 let html = await readFile('dist/index.html', 'utf8');
 for (const file of ['styles.css', 'theme.js', 'app.js']) {

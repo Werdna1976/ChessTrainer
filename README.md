@@ -4,7 +4,7 @@ Play either side against Stockfish at four difficulty settings using the slider 
 
 Open **Appearance** to mix and match board palettes and piece sets or mute the move sounds. These settings are saved in your browser.
 
-The review board preserves the coach’s notes, highlights turning points, and lets you retry a position from your own game. The training library includes four puzzles and practice lines for the French Defense, Sicilian Defense, London System, and Italian Game.
+The review board follows the opening, middlegame, and endgame, with jump points for turning points, attacks, defenses, and plans observed on the board. It preserves the coach’s notes and your original proposal when you play a different move. You can compare the lines or retry a position from your game. The training library includes four puzzles and practice lines for the French Defense, Sicilian Defense, London System, and Italian Game.
 
 Use the move tracker to click a move, scrub the timeline, or step with the left and right arrow keys. **Live** returns to the current position in Coach & Play. The **Change** column compares Stockfish’s estimate for the move played with its estimate before the move, from the perspective of the side that moved. Use **Analyze game** to fill in missing scores from older games.
 

@@ -3,6 +3,7 @@ import { Engine, levels, uci, pieceNames, assess, explain, formatScore, boardLin
 import { openings, challenges } from './content.js';
 import { boards, sets, pieceArt, loadAppearance, saveAppearance, playMoveSound } from './appearance.js';
 import { openingPositionKey } from './book.js';
+import { chapters, phasePositions, chapterStory, moveThemes, compareChoices, moveNumber } from './review.js';
 
 const $ = (id) => document.getElementById(id);
 const escape = (input) => String(input ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
@@ -21,7 +22,7 @@ const modes = {
   play: ['Coach & play', 'Explore a move before you commit to it.', 'New game'],
   challenges: ['Chess challenges', 'Find a forcing move and play the idea through.', 'Restart puzzle'],
   openings: ['Opening trainers', 'Practice the first moves and learn what each one sets up.', 'Restart lesson'],
-  review: ['Game review', 'Replay your decisions and revisit the moments that mattered.', 'Export PGN'],
+  review: ['Game review', 'Follow the flow of the game, then replay the decisions that shaped it.', 'Export PGN'],
 };
 const classifications = ['Checkmate', 'Good move', 'Playable', 'Inaccuracy', 'Mistake', 'Blunder', 'Missed mate', 'Unrated'];
 const gradeStyle = (grade) => ({ Checkmate: 'good', 'Good move': 'good', Inaccuracy: 'mistake', Mistake: 'mistake', Blunder: 'blunder', 'Missed mate': 'blunder' })[grade] || '';
@@ -33,6 +34,7 @@ let mode = 'play';
 let facing = library.current.color;
 let selected = '';
 let proposal = null;
+let firstProposal = null;
 let variation = null;
 let busy = false;
 let engineError = '';
@@ -51,6 +53,7 @@ let livePly = null;
 let toast = '';
 let openingBook = {};
 const scoring = new Map();
+const reviewHistories = new WeakMap();
 
 function reconstruct(record, limit = record.moves.length) {
   const position = new Chess();
@@ -74,13 +77,17 @@ function validateStore(raw) {
         && entry.moves.every((code) => typeof code === 'string' && /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(code))
         ? { type: entry.type, score: entry.score, moves: entry.moves.slice(0, 6) } : null;
       const playedLine = line(note.line);
+      const proposed = note.original?.move;
+      const original = typeof proposed === 'string' && /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(proposed)
+        && proposed !== input.moves[index - 1] && boardLine(history[index - 1].before, [proposed]).length
+        ? { move: proposed, line: note.original.line?.moves?.[0] === proposed ? line(note.original.line) : null } : undefined;
       const savedRisks = list(note.risks);
       const usesOldWording = savedRisks.some((risk) => /^(Test your idea against |Watch |Your opponent can (answer with|play) )/.test(risk));
       const currentRisks = playedLine && usesOldWording ? explain(history[index - 1], playedLine).risks : [];
       notes[index] = {
         grade: note.grade, benefits: list(note.benefits), risks: currentRisks.length ? currentRisks : savedRisks,
         highlights: list(note.highlights), tag: typeof note.tag === 'string' ? note.tag : '',
-        line: playedLine, best: line(note.best),
+        line: playedLine, best: line(note.best), original,
       };
     }
     return { id: input.id, date: input.date, color: input.color, level: input.level, moves: history.map(uci), notes };
@@ -261,6 +268,7 @@ function render() {
   $('header-action').textContent = action;
   $('header-action').disabled = mode === 'review' && !getReview().moves.length;
   $('details').classList.toggle('move-tracker', mode === 'play' || mode === 'review');
+  $('review-story').hidden = mode !== 'review';
   $('difficulty-control').hidden = mode !== 'play';
   syncDifficulty($('difficulty'), $('difficulty-level'), library.current.level);
   for (const link of document.querySelectorAll('[data-mode]')) {
@@ -317,7 +325,7 @@ function renderTracker(record, list, cursor, heading) {
   const focused = details.contains(document.activeElement) ? document.activeElement : null;
   const end = list.length;
   const following = mode === 'play' && livePly === null;
-  const pending = list.filter((_, index) => !moveImpact(record.notes[index + 1])).length;
+  const pending = list.filter((_, index) => needsScoring(record.notes[index + 1])).length;
   const job = scoring.get(record);
   const navigation = end ? '<div class="timeline-controls" aria-label="Game timeline">'
     + '<label for="timeline-position">' + (following ? 'Live position' : cursor ? 'After ' + Math.ceil(cursor / 2) + (cursor % 2 ? '. ' : '… ') + escape(list[cursor - 1].san) : 'Starting position') + '</label>'
@@ -465,18 +473,93 @@ function dateLabel(record) {
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(record.date));
 }
 
+function reviewHistory(record) {
+  let cached = reviewHistories.get(record);
+  if (cached?.moves.length !== record.moves.length) {
+    const game = reconstruct(record);
+    cached = { moves: game.history({ verbose: true }), result: resultText(game) };
+    reviewHistories.set(record, cached);
+  }
+  return cached;
+}
+
+function renderGameStory(record, history, chapterViews, current) {
+  const story = $('review-story');
+  const focused = story.contains(document.activeElement) ? document.activeElement.dataset.phase : null;
+  const hasMoves = history.moves.length > 0;
+  const scored = chapterViews.reduce((sum, chapter) => sum + (chapter.story?.coverage || 0), 0);
+  const result = history.result || (record === library.current ? 'Game in progress' : 'Game saved before a result');
+  story.innerHTML = '<div class="story-heading"><div><h2>Game story</h2><p class="muted">'
+    + (hasMoves ? 'You played ' + playerName(record.color) + '. ' + result + (result.endsWith('.') ? '' : '.') : 'Play a game to see how its opening, middlegame, and endgame unfold.')
+    + '</p></div>' + (hasMoves ? '<span class="badge">' + scored + ' of ' + history.moves.length + ' moves scored</span>' : '') + '</div>'
+    + '<div class="story-chapters">' + chapterViews.map(({ phase, positions, story: account }) => {
+      const first = positions[0];
+      const last = positions.at(-1);
+      const range = first ? moveNumber(first.ply) + first.move.san + (first === last ? '' : ' to ' + moveNumber(last.ply) + last.move.san) : 'Phase not reached';
+      return '<button class="story-chapter" data-action="review-chapter" data-phase="' + phase.id + '" data-value="' + (account?.focus || '') + '"'
+        + (current === phase.id ? ' aria-current="true"' : '') + (account ? '' : ' disabled') + '><span class="chapter-title">'
+        + phase.name + '</span><span class="chapter-range">' + escape(range) + '</span><span class="chapter-summary">'
+        + escape(account?.summary || phase.question) + '</span></button>';
+    }).join('') + '</div>';
+  if (focused) story.querySelector('[data-phase="' + focused + '"]')?.focus({ preventScroll: true });
+}
+
+function chapterDrill(phase, story) {
+  if (!story) return '';
+  return '<section class="chapter-drill" aria-label="' + phase.name + ' themes"><h3>' + phase.name + ' themes</h3>'
+    + (story.arc ? '<p>' + escape(story.arc) + '</p>' : '')
+    + (story.moments.length ? '<div class="story-moments">' + story.moments.map((moment) =>
+      '<button class="story-moment" data-action="review-ply" data-value="' + moment.ply + '"' + (moment.ply === reviewPly ? ' aria-current="step"' : '') + '>'
+      + '<span class="moment-top"><span>' + escape(moment.label) + '</span><strong>' + escape(moveNumber(moment.ply) + moment.move.san) + '</strong></span>'
+      + '<span>' + escape(moment.text) + '</span></button>').join('') + '</div>' : '')
+    + '<p class="chapter-lesson"><strong>Take it into your next game</strong><br>' + escape(story.lesson) + '</p></section>';
+}
+
+function reviewComparison(comparison) {
+  if (!comparison) return '';
+  const { choices, stronger, reason } = comparison;
+  const verdict = stronger !== null ? 'Stockfish favors ' + choices[stronger].move.san + '.'
+    : choices.every((choice) => choice.line) ? 'Stockfish rates these moves close together.' : 'Compare the two ideas on the board.';
+  return '<section class="review-comparison" aria-label="Move comparison"><h3>Why choose a different move?</h3>'
+    + '<p><strong>' + escape(verdict) + '</strong> ' + escape(reason) + '</p><div class="review-choices">'
+    + choices.map((choice, index) => {
+      const theme = choice.themes.defense || choice.themes.attack || choice.themes.plan || choice.themes.risk;
+      return '<button class="review-choice' + (stronger === index ? ' preferred-choice' : '') + '" data-action="review-choice" data-value="' + index
+        + '" aria-pressed="' + (variation?.comparisonIndex === index) + '">'
+        + '<span class="moment-top"><span>' + choice.label + '</span><strong>' + escape(choice.move.san) + '</strong></span>'
+        + (theme ? '<span>' + escape(theme) + '</span>' : '') + (choice.reply ? '<span>' + escape(choice.reply) + '</span>' : '')
+        + (choice.line ? '<span class="choice-score">Stockfish evaluation ' + escape(formatScore(choice.line)) + '</span>' : '')
+        + '</button>';
+    }).join('') + '</div></section>';
+}
+
 function renderReview() {
   const record = getReview();
-  const list = reconstruct(record).history({ verbose: true });
+  const history = reviewHistory(record);
+  const list = history.moves;
+  const positions = phasePositions(list);
+  const chapterViews = chapters.map((phase) => {
+    const section = positions.filter(({ chapter }) => chapter === phase.id);
+    return { phase, positions: section, story: section.length ? chapterStory(section, record.notes, bookEntry) : null };
+  });
+  const currentChapter = positions[reviewPly - 1]?.chapter;
+  const view = chapterViews.find(({ phase }) => phase.id === currentChapter);
+  renderGameStory(record, history, chapterViews, currentChapter);
   const played = list[reviewPly - 1];
   const note = record.notes[reviewPly];
   const keyPlies = Object.entries(record.notes).filter(([, item]) => ['Blunder', 'Mistake', 'Inaccuracy', 'Missed mate'].includes(item.grade)).map(([ply]) => Number(ply));
-  let copy = '<p class="kicker">Analysis board</p>';
+  let copy = (view && !reviewRetry ? chapterDrill(view.phase, view.story) : '') + '<p class="kicker">Analysis board</p>';
   if (played) {
     copy += recordedMoveCopy(record, played, reviewPly);
+    const themes = moveThemes(played);
+    const context = [themes.defense, themes.attack, themes.risk].filter(Boolean);
+    if (context.length) copy += '<p class="review-context">' + escape(context.join(' ')) + '</p>';
+    const comparison = played.color === record.color ? compareChoices(played, note) : null;
+    copy += reviewComparison(comparison);
     if (note && !variation) copy += buttons((note.line?.moves.length > 1 ? button('review-line', 'Show reply', 'secondary', 'line') : '')
-      + (note.best && note.best.moves[0] !== uci(played) ? button('review-line', 'See alternative', 'secondary', 'best') : '')
+      + (!comparison && note.best && note.best.moves[0] !== uci(played) ? button('review-line', 'See alternative', 'secondary', 'best') : '')
       + button('review-retry', 'Retry position'));
+    if (!moveImpact(note) && !scoring.get(record)?.running) copy += buttons(button('score-review-move', 'Score this move', 'secondary', reviewPly));
   } else copy += '<h2>Starting position</h2><p class="muted">' + (list.length ? 'Step through the moves or jump to a turning point.' : 'Play a game to build your review history.') + '</p>';
   if (variation) copy += variationControls();
   if (keyPlies.length) {
@@ -527,6 +610,7 @@ function renderReview() {
 
 function prepareProposal(move) {
   proposal = { move, note: null, choices: [], selectedOption: null, error: '' };
+  firstProposal ??= proposal;
   selected = '';
   void analyzeProposal();
 }
@@ -552,10 +636,14 @@ function refreshScores(record) {
   if (mode === 'review' && getReview() === record) renderReview();
 }
 
+function needsScoring(note) {
+  return !moveImpact(note) || Boolean(note?.original && !note.original.line);
+}
+
 function scoreMoves(record, plies) {
   const job = scoring.get(record) || { queue: new Set(), running: false, failed: false };
   for (const ply of plies) {
-    if (!moveImpact(record.notes[ply])) job.queue.add(ply);
+    if (needsScoring(record.notes[ply])) job.queue.add(ply);
   }
   if (!job.queue.size) return;
   scoring.set(record, job);
@@ -570,15 +658,28 @@ async function runScoring(record, job) {
   try {
     while (job.queue.size && retained()) {
       const ply = job.queue.values().next().value;
-      if (!moveImpact(record.notes[ply])) {
+      const history = record.moves.slice(0, ply - 1);
+      let note = record.notes[ply];
+      if (!moveImpact(note)) {
         const after = reconstruct(record, ply);
         const move = after.history({ verbose: true }).at(-1);
-        const { note } = await evaluateMove(move, record.moves.slice(0, ply - 1), { fast: true, after });
-        if (!moveImpact(note)) throw new Error('Stockfish did not score the move.');
-        if (retained()) {
-          record.notes[ply] = note;
-          save();
+        const evaluated = await evaluateMove(move, history, { fast: true, after });
+        if (!moveImpact(evaluated.note)) throw new Error('Stockfish did not score the move.');
+        note = { ...evaluated.note, original: note?.original };
+      }
+      if (note.original && !note.original.line && retained()) {
+        const { move: code } = note.original;
+        let line = note.best?.moves[0] === code ? note.best : null;
+        if (!line) {
+          const result = await engine.search({ history, restrict: code, ms: 250 });
+          line = result.lines[0];
         }
+        if (line?.moves[0] !== code) throw new Error('Stockfish did not score the original proposal.');
+        note = { ...note, original: { move: code, line } };
+      }
+      if (retained()) {
+        record.notes[ply] = note;
+        save();
       }
       job.queue.delete(ply);
       if (retained() && job.queue.size) refreshScores(record);
@@ -638,9 +739,12 @@ function commit() {
   const record = library.current;
   soundFor(recorded);
   library.current.moves.push(uci(recorded));
-  library.current.notes[library.current.moves.length] = note || {
+  const scored = note || {
     ...explain(recorded), grade: recorded.san.endsWith('#') ? 'Checkmate' : 'Unrated', line: null, best: null,
   };
+  const original = firstProposal && uci(firstProposal.move) !== uci(recorded)
+    ? { move: uci(firstProposal.move), line: firstProposal.note?.line || null } : undefined;
+  library.current.notes[library.current.moves.length] = original ? { ...scored, original } : scored;
   clearProposal();
   save();
   render();
@@ -648,8 +752,9 @@ function commit() {
   scoreMoves(record, [record.moves.length]);
 }
 
-function clearProposal() {
+function clearProposal({ keepOriginal = false } = {}) {
   proposal = null;
+  if (!keepOriginal) firstProposal = null;
   variation = null;
   busy = false;
   selected = '';
@@ -839,7 +944,7 @@ function backupDialog() {
 }
 
 const actions = {
-  cancel() { clearProposal(); },
+  cancel() { clearProposal({ keepOriginal: true }); },
   analyze() { void analyzeProposal(); },
   commit() { commit(); },
   'opponent-retry'() { void playOpponent(); },
@@ -875,6 +980,16 @@ const actions = {
     variation = null;
     reviewRetry = null;
     selected = '';
+  },
+  'review-chapter'(index) { actions['review-ply'](index); },
+  'score-review-move'(index) { scoreMoves(getReview(), [Number(index)]); },
+  'review-choice'(index) {
+    const record = getReview();
+    const played = reviewHistory(record).moves[reviewPly - 1];
+    const choice = compareChoices(played, record.notes[reviewPly])?.choices[index];
+    if (!choice) return;
+    openVariation(played.before, choice.line || { moves: [uci(choice.move)] });
+    if (variation) variation.comparisonIndex = Number(index);
   },
   'review-retry'() {
     const record = getReview();
@@ -960,6 +1075,7 @@ document.addEventListener('click', (event) => {
   if (control.dataset.action !== 'restore') toast = '';
   actions[control.dataset.action]?.(control.dataset.value, control);
   render();
+  if (control.dataset.action === 'review-chapter') $('workspace').scrollIntoView({ block: 'nearest' });
 });
 document.addEventListener('input', ({ target }) => {
   if (target.id === 'difficulty') {
