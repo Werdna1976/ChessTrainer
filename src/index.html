@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Practice chess with a Stockfish-powered coach, replay your games, and drill tactics and openings.">
+  <title>Quiet Square | Chess Trainer</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="#play"><span class="brand-mark" aria-hidden="true">♞</span><span>Quiet Square<small>Chess trainer</small></span></a>
+    <nav aria-label="Training">
+      <a href="#play" data-mode="play"><span aria-hidden="true">♞</span> Coach &amp; play</a>
+      <a href="#challenges" data-mode="challenges"><span aria-hidden="true">◇</span> Challenges</a>
+      <a href="#openings" data-mode="openings"><span aria-hidden="true">▤</span> Openings</a>
+      <a href="#review" data-mode="review"><span aria-hidden="true">↻</span> Game review</a>
+    </nav>
+    <div class="sidebar-footer">
+      <p id="engine-status"><span class="status-dot"></span> Stockfish 19 Lite</p>
+      <button id="backup" class="text-button">Training backups</button>
+      <button id="credits" class="text-button">Engine &amp; licenses</button>
+    </div>
+  </aside>
+  <main>
+    <header class="page-header">
+      <div><h1 id="title">Coach &amp; play</h1><p id="subtitle">Explore a move before you commit to it.</p></div>
+      <button id="header-action" class="secondary">New game</button>
+    </header>
+    <div class="workspace">
+      <section class="board-area" aria-label="Chess position">
+        <div class="board-caption" id="top-player"></div>
+        <div id="board" class="board" role="group" aria-label="Chessboard"></div>
+        <div class="board-caption bottom"><div id="bottom-player"></div><button id="flip" class="text-button">Flip board</button></div>
+      </section>
+      <aside class="tools" aria-label="Training controls">
+        <section class="card primary-card" id="panel"></section>
+        <section class="card" id="details"></section>
+      </aside>
+    </div>
+    <p id="announcement" class="sr-only" aria-live="polite"></p>
+  </main>
+  <dialog id="dialog"><div id="dialog-content"></div></dialog>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

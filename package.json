@@ -1,0 +1,14 @@
+{
+  "name": "quiet-square",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "npm run build && node scripts/serve.mjs"
+  },
+  "dependencies": {
+    "chess.js": "1.4.0",
+    "stockfish": "19.0.1"
+  }
+}
