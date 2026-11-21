@@ -1,5 +1,5 @@
 import { Chess } from './vendor/chess.js';
-import { Engine, levels, uci, pieceNames, assess, explain, formatScore, boardLine } from './engine.js';
+import { Engine, levels, uci, pieceNames, assess, explain, formatScore, boardLine, describeMove } from './engine.js';
 import { openings, challenges } from './content.js';
 import { boards, sets, pieceArt, loadAppearance, saveAppearance, playMoveSound } from './appearance.js';
 
@@ -61,7 +61,7 @@ function validateStore(raw) {
     if (!input || typeof input.id !== 'string' || !['w', 'b'].includes(input.color) || !levels.some((x) => x.id === input.level)
       || !Array.isArray(input.moves) || !Number.isFinite(Date.parse(input.date))) throw new Error('Invalid game record.');
     if (!input.moves.every((code) => typeof code === 'string' && /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(code))) throw new Error('Invalid game moves.');
-    const position = reconstruct(input);
+    const history = reconstruct(input).history({ verbose: true });
     const notes = {};
     const list = (items) => Array.isArray(items) ? items.filter((item) => typeof item === 'string').slice(0, 8) : [];
     for (const [key, note] of Object.entries(input.notes || {})) {
@@ -70,13 +70,17 @@ function validateStore(raw) {
       const line = (entry) => ['cp', 'mate'].includes(entry?.type) && Number.isFinite(entry.score) && Array.isArray(entry.moves)
         && entry.moves.every((code) => typeof code === 'string' && /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(code))
         ? { type: entry.type, score: entry.score, moves: entry.moves.slice(0, 6) } : null;
+      const playedLine = line(note.line);
+      const savedRisks = list(note.risks);
+      const usesOldWording = savedRisks.some((risk) => /^(Test your idea against |Watch |Your opponent can (answer with|play) )/.test(risk));
+      const currentRisks = playedLine && usesOldWording ? explain(history[index - 1], playedLine).risks : [];
       notes[index] = {
-        grade: note.grade, benefits: list(note.benefits), risks: list(note.risks),
+        grade: note.grade, benefits: list(note.benefits), risks: currentRisks.length ? currentRisks : savedRisks,
         highlights: list(note.highlights), tag: typeof note.tag === 'string' ? note.tag : '',
-        line: line(note.line), best: line(note.best),
+        line: playedLine, best: line(note.best),
       };
     }
-    return { id: input.id, date: input.date, color: input.color, level: input.level, moves: position.history({ verbose: true }).map(uci), notes };
+    return { id: input.id, date: input.date, color: input.color, level: input.level, moves: history.map(uci), notes };
   }
   return {
     version: 1, current: record(raw.current), archive: raw.archive.map(record),
@@ -263,16 +267,17 @@ function moveList(list, notes = {}, active = -1) {
 
 function variationControls() {
   const move = variation.moves[variation.index - 1];
-  return '<div class="tip"><strong>Explore the line</strong><p>' + variation.moves.map((item) => escape(item.san)).join(' ') + '</p>'
-    + '<p>' + (move ? playerName(move.color) + ' played ' + escape(move.san) : 'Starting position') + '</p>'
+  const next = variation.moves[variation.index];
+  return '<div class="tip"><strong>Stockfish preview</strong>'
+    + '<p>' + (move ? playerName(move.color) + ' could ' + escape(describeMove(move)) + '.' : 'Position before the first move') + '</p>'
     + buttons(button('line-step', 'Back', 'secondary', variation.index - 1, variation.index === 0)
-      + button('line-step', 'Next move', 'secondary', variation.index + 1, variation.index === variation.moves.length)
-      + button('close-line', 'Close line')) + '</div>';
+      + (next ? button('line-step', 'Show ' + playerName(next.color) + '’s move', 'secondary', variation.index + 1) : '')
+      + button('close-line', 'Close preview')) + '</div>';
 }
 
 function noteCopy(note) {
   return (note.benefits.length ? '<h3>What it does</h3>' + note.benefits.map((item) => '<p>' + escape(item) + '</p>').join('') : '')
-    + (note.risks.length ? '<h3>What to watch</h3>' + note.risks.map((item) => '<p>' + escape(item) + '</p>').join('') : '');
+    + (note.risks.length ? '<h3>What your opponent might play</h3>' + note.risks.map((item) => '<p>' + escape(item) + '</p>').join('') : '');
 }
 
 function renderPlay() {
@@ -286,7 +291,7 @@ function renderPlay() {
     else if (proposal.error) panel += '<p role="status">' + escape(proposal.error) + '</p>' + buttons(button('analyze', 'Retry analysis'));
     else if (note) {
       panel += noteCopy(note);
-      if (!note.benefits.length && !note.risks.length) panel += '<p class="muted">The position ends after this move.</p>';
+      if (!note.benefits.length && !note.risks.length) panel += '<p class="muted">Stockfish didn’t show a follow-up for this move.</p>';
       if (proposal.choices.length) {
         panel += '<h3>Compare alternatives</h3><div class="lines">';
         for (const [i, option] of proposal.choices.entries()) {
@@ -299,7 +304,7 @@ function renderPlay() {
         panel += '<h3>' + escape(other.move.san) + '</h3>' + noteCopy(other.note);
         panel += buttons(button('commit-option', 'Play ' + other.move.san, 'secondary', other.index));
       }
-      if (note.line?.moves.length > 1 && !variation) panel += buttons(button('proposal-line', 'See the reply'));
+      if (note.line?.moves.length > 1 && !variation) panel += buttons(button('proposal-line', 'Show opponent’s reply on the board'));
     }
     if (variation) panel += variationControls();
     panel += buttons(button('commit', 'Play ' + proposed.san, 'primary') + button('cancel', 'Try another move'));
@@ -368,7 +373,7 @@ function renderReview() {
     copy += '<div class="card-head"><h2>' + Math.ceil(reviewPly / 2) + (played.color === 'w' ? '. ' : '… ') + escape(played.san) + '</h2>'
       + (note ? '<span class="badge ' + gradeStyle(note.grade) + '">' + escape(note.grade) + '</span>' : '') + '</div>';
     copy += note ? noteCopy(note) || '<p class="muted">Explore the engine line to see what follows.</p>' : '<p class="muted">' + playerName(played.color) + ' played ' + escape(played.san) + '.</p>';
-    if (note && !variation) copy += buttons((note.line?.moves.length > 1 ? button('review-line', 'See played line', 'secondary', 'line') : '')
+    if (note && !variation) copy += buttons((note.line?.moves.length > 1 ? button('review-line', 'Show opponent’s reply', 'secondary', 'line') : '')
       + (note.best && note.best.moves[0] !== uci(played) ? button('review-line', 'See alternative', 'secondary', 'best') : '')
       + button('review-retry', 'Retry position'));
   } else copy += '<h2>Starting position</h2><p class="muted">' + (list.length ? 'Step through the moves or jump to a turning point.' : 'Play a game to build your review history.') + '</p>';
@@ -390,7 +395,7 @@ function renderReview() {
         copy += '<h3>Compare ' + escape(suggested.san) + '</h3>' + noteCopy(explain(suggested, attempt.note.best));
         if (!variation) copy += buttons(button('retry-line', 'Explore ' + suggested.san, 'secondary', 'best'));
       }
-      if (!variation && attempt.note.line?.moves.length > 1) copy += buttons(button('retry-line', 'See your reply line', 'secondary', 'line'));
+      if (!variation && attempt.note.line?.moves.length > 1) copy += buttons(button('retry-line', 'Show opponent’s reply', 'secondary', 'line'));
     } else copy += '<p role="status">' + (attempt.error || 'Stockfish is analyzing your move…') + '</p>';
     if (variation) copy += variationControls();
     copy += buttons((attempt.move && (attempt.note || attempt.error) ? button('review-retry', 'Try another move') : '') + button('retry-close', 'Back to game'));
@@ -605,11 +610,11 @@ function chooseSquare(square) {
   renderBoard();
 }
 
-function openVariation(fen, line, option) {
+function openVariation(fen, line, { option, index = 1 } = {}) {
   if (!line) return;
   const moves = boardLine(fen, line.moves);
   if (!moves.length) return;
-  variation = { fen, moves, index: 1, option };
+  variation = { fen, moves, index: Math.min(index, moves.length), option };
 }
 
 function download(filename, mime, content) {
@@ -682,9 +687,9 @@ const actions = {
   'opponent-retry'() { void playOpponent(); },
   option(index) {
     const option = proposal?.choices[index];
-    if (option) openVariation(option.move.before, option.line, { ...option, index });
+    if (option) openVariation(option.move.before, option.line, { option: { ...option, index } });
   },
-  'proposal-line'() { openVariation(proposal.move.before, proposal.note.line); },
+  'proposal-line'() { openVariation(proposal.move.before, proposal.note.line, { index: 2 }); },
   'line-step'(index) { if (variation) variation.index = Math.max(0, Math.min(Number(index), variation.moves.length)); },
   'close-line'() { variation = null; },
   hint() { hintOn = !hintOn; },
@@ -704,10 +709,10 @@ const actions = {
     selected = '';
   },
   'retry-close'() { reviewRetry = null; variation = null; selected = ''; },
-  'retry-line'(kind) { openVariation(reviewRetry.fen, reviewRetry.note?.[kind]); },
+  'retry-line'(kind) { openVariation(reviewRetry.fen, reviewRetry.note?.[kind], { index: kind === 'line' ? 2 : 1 }); },
   'review-line'(kind) {
     const record = getReview();
-    openVariation(reconstruct(record, reviewPly - 1).fen(), record.notes[reviewPly]?.[kind]);
+    openVariation(reconstruct(record, reviewPly - 1).fen(), record.notes[reviewPly]?.[kind], { index: kind === 'line' ? 2 : 1 });
   },
   dismiss,
   'appearance-option'(value, control) {

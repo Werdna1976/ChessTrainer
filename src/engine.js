@@ -13,10 +13,26 @@ const values = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 
 export function boardLine(fen, moves) {
   const game = new Chess(fen);
-  return moves.slice(0, 6).flatMap((code) => {
-    try { return [game.move(code)]; }
-    catch { return []; }
-  });
+  const line = [];
+  for (const code of moves.slice(0, 6)) {
+    try { line.push(game.move(code)); }
+    catch { break; }
+  }
+  return line;
+}
+
+export function describeMove(move) {
+  if (move.flags === 'k') return 'castle kingside (' + move.san + ')';
+  if (move.flags === 'q') return 'castle queenside (' + move.san + ')';
+  const piece = pieceNames[move.piece];
+  let text = move.captured
+    ? 'use the ' + piece + ' on ' + move.from + ' to take the ' + pieceNames[move.captured]
+      + (move.flags.includes('e') ? ' en passant, landing on ' : ' on ') + move.to
+    : 'move the ' + piece + ' from ' + move.from + ' to ' + move.to;
+  if (move.promotion) text += ' and promote it to a ' + pieceNames[move.promotion];
+  if (move.san.endsWith('#')) text += ' for checkmate';
+  else if (move.san.endsWith('+')) text += ' to give check';
+  return text + (move.san === move.to ? '' : ' (' + move.san + ')');
 }
 
 function waitFor(worker, command, done, consume = () => {}) {
@@ -113,19 +129,21 @@ export function explain(move, line) {
   if (move.piece === 'p' && /^[de][45]$/.test(move.to)) benefits.push('Your pawn occupies the center.');
   if (move.promotion) benefits.push('Your pawn promotes to a ' + pieceNames[move.promotion] + '.');
 
-  const continuation = boardLine(move.before, line?.moves || []);
+  const continuation = line?.moves[0] === uci(move) ? boardLine(move.before, line.moves) : [];
   const reply = continuation[1];
   const answer = continuation[2];
   const risks = [];
   let tag = '';
+  if (reply) {
+    risks.push('If you play ' + move.san + ', your opponent could ' + describeMove(reply) + '.');
+    if (answer) risks.push('You could then ' + describeMove(answer) + '.');
+  }
   if (reply?.san.endsWith('#')) {
-    risks.push('Your opponent can answer with ' + reply.san + ', checkmate.');
     highlights.push(reply.to);
     tag = 'King safety';
   } else if (reply?.captured && (reply.to !== move.to || values[reply.captured] > (values[move.captured] || 0))) {
     const recovered = answer?.captured ? values[answer.captured] : 0;
     const net = values[reply.captured] - (values[move.captured] || 0) - recovered;
-    risks.push('Watch ' + reply.san + '. It takes your ' + pieceNames[reply.captured] + (answer?.captured ? ', and the line continues ' + answer.san + '.' : '.'));
     highlights.push(reply.to);
     if (net > 0) tag = 'Loose pieces';
     if (reply.to !== move.to && !reply.flags.includes('e') && !after.attackers(reply.to, move.color).length
@@ -133,10 +151,7 @@ export function explain(move, line) {
       risks.push('Moving from ' + move.from + ' removes your last defender of ' + reply.to + '.');
     }
   } else if (reply?.san.endsWith('+')) {
-    risks.push('Your opponent can play ' + reply.san + ' with check. Try the line to see how you can respond.');
     tag = 'Forcing replies';
-  } else if (reply) {
-    risks.push('Test your idea against ' + reply.san + (answer ? ' and see how ' + answer.san + ' responds.' : '.'));
   }
   const center = ['d4', 'e4', 'd5', 'e5'].filter((square) => after.attackers(square, move.color).includes(move.to)
     && !before.attackers(square, move.color).includes(move.from));
