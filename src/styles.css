@@ -25,6 +25,12 @@
   --yellow-bg: #faf0dd;
   --red: #a12d38;
   --red-bg: #f9e9ea;
+  --original: #6946b4;
+  --original-bg: #f1ebff;
+  --coaching-attack: #26ceaa8c;
+  --coaching-threat: #f05a618c;
+  --book-ink: #335b8a;
+  --book-bg: #e9f0fc;
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
@@ -52,6 +58,10 @@
   --yellow-bg: #443522;
   --red: #ffb0b5;
   --red-bg: #492b32;
+  --original: #c4a5ff;
+  --original-bg: #35294c;
+  --book-ink: #b9d3ff;
+  --book-bg: #283752;
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -137,6 +147,12 @@ h1 { font-size: clamp(1.9rem, 3vw, 2.55rem); font-weight: 750; letter-spacing: -
 .square.selected { background: var(--played); color: #272730; box-shadow: inset 0 0 0 3px #fff8c8; text-shadow: none; }
 .square.marked { box-shadow: inset 0 0 0 4px #ffbf83; }
 .square.check { box-shadow: inset 0 0 22px 7px #dc5146; }
+.square.attack-target { background-image: linear-gradient(var(--coaching-attack), var(--coaching-attack)); }
+.square.threatened { background-image: linear-gradient(var(--coaching-threat), var(--coaching-threat)); }
+.square.original-square::before {
+  content: ''; position: absolute; inset: 2px; z-index: 1; pointer-events: none;
+  border: 3px solid var(--original); border-radius: 4px; box-shadow: 0 0 0 1px #faf4ff;
+}
 .square:focus-visible { z-index: 2; outline-offset: -3px; outline-color: white; }
 .square.target::after { content: ''; position: absolute; width: 21%; aspect-ratio: 1; border-radius: 50%; background: #18182064; }
 .square.target:has(.piece)::after { width: 88%; background: transparent; border: 4px solid #18182064; pointer-events: none; }
@@ -155,6 +171,12 @@ h1 { font-size: clamp(1.9rem, 3vw, 2.55rem); font-weight: 750; letter-spacing: -
 .coordinate { position: absolute; font-size: clamp(9px, 2.3cqw, 13px); font-weight: 760; pointer-events: none; }
 .coordinate.rank { top: 2px; left: 4px; }
 .coordinate.file { bottom: 2px; right: 4px; }
+.board-legend { display: flex; flex-wrap: wrap; gap: 5px 14px; color: var(--muted); font-size: .8rem; padding-top: 3px; }
+.board-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.board-legend span::before { content: ''; width: 10px; height: 10px; border-radius: 2px; }
+.original-key::before { border: 2px solid var(--original); }
+.attack-key::before { background: var(--coaching-attack); }
+.threat-key::before { background: var(--coaching-threat); }
 .card { padding: clamp(14px, 1.6vw, 21px); background: var(--card); border: 1px solid var(--line); border-radius: 11px; min-width: 0; }
 .primary-card { border-top: 2px solid var(--card-stripe); }
 .card h2, dialog h2 { font-size: 1.2rem; letter-spacing: -.025em; margin-bottom: 8px; }
@@ -175,17 +197,28 @@ h1 { font-size: clamp(1.9rem, 3vw, 2.55rem); font-weight: 750; letter-spacing: -
 .lines { display: grid; gap: 6px; margin: 12px 0 0; }
 .line { text-align: left; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .line small { font-size: .78rem; }
+.candidates { margin: 0 0 16px; }
+.candidates .line[aria-pressed="true"] { background: var(--hover); border-color: var(--focus); box-shadow: inset 0 0 0 1px var(--focus); }
+.candidates .original-candidate { border-inline-start: 4px solid var(--original); background: var(--original-bg); }
+.candidates .original-candidate[aria-pressed="true"] { background: var(--original-bg); border-color: var(--original); box-shadow: inset 0 0 0 1px var(--original); }
 .badge { font-size: .76rem; padding: 3px 7px; border-radius: 5px; white-space: nowrap; color: var(--muted); background: var(--soft); }
 .badge.good { color: var(--good); background: var(--good-bg); }
 .badge.mistake { color: var(--yellow); background: var(--yellow-bg); }
 .badge.blunder { color: var(--red); background: var(--red-bg); }
+.badge.book { color: var(--book-ink); background: var(--book-bg); }
+.book-detail { display: flex; align-items: baseline; gap: 5px; color: var(--muted); font-size: .86rem; }
+.book-cell { color: var(--book-ink); font-size: .78rem; }
 .move-quality { display: flex; justify-content: space-between; align-items: center; gap: 6px; margin: 6px 0 8px; font-size: .82rem; color: var(--muted); }
 .moves { max-height: 214px; overflow-y: auto; margin-top: 7px; }
-.move-row { display: grid; grid-template-columns: 27px 1fr 1fr; min-height: 32px; align-items: center; border-bottom: 1px solid var(--line); font-size: .88rem; gap: 2px; }
-.move-row > span { color: var(--muted); }
-.move-row button { display: flex; gap: 5px; justify-content: space-between; align-items: center; color: var(--ink); background: transparent; border: none; border-radius: 4px; padding: 5px; min-width: 0; text-align: left; }
-.move-row button:hover, .move-row button.current { background: var(--hover); }
-.move-row .badge { width: 7px; height: 7px; padding: 0; background: currentColor; }
+.moves table { width: 100%; border-collapse: collapse; font-size: .88rem; text-align: left; }
+.moves :is(th, td) { padding: 4px 6px; border-bottom: 1px solid var(--line); }
+.moves :is(th, td):first-child { padding-left: 0; }
+.moves th { position: sticky; top: 0; background: var(--card); color: var(--muted); font-size: .76rem; }
+.moves td:first-child { color: var(--muted); white-space: nowrap; }
+.moves td:last-child { overflow-wrap: anywhere; }
+.moves button { display: flex; gap: 5px; justify-content: space-between; align-items: center; color: var(--ink); background: transparent; border: none; border-radius: 4px; padding: 5px; min-width: 0; text-align: left; }
+.moves button:hover, .moves button.current { background: var(--hover); }
+.moves .badge { width: 7px; height: 7px; padding: 0; background: currentColor; }
 .field { display: grid; gap: 6px; color: var(--muted); font-size: .9rem; margin: 13px 0 0; }
 select { width: 100%; background: var(--control); color: var(--ink); border: 1px solid var(--strong-border); border-radius: 7px; padding: 8px 10px; }
 dialog { color: var(--ink); background: var(--card); border-radius: 13px; border: 1px solid var(--strong-border); width: min(440px, 92vw); padding: 23px; box-shadow: 0 18px 55px #1114; }

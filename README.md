@@ -34,3 +34,5 @@ Games and progress are saved in the browser. Use **Training backups** to export 
 The build copies the unmodified Stockfish 19 Lite single-threaded worker and WebAssembly binary from the pinned Stockfish.js 19.0.1 npm package. The site includes its GPLv3 license, and the matching version of the source includes the build instructions. [Stockfish.js 19.0.1 source](https://github.com/nmrugg/stockfish.js/tree/v19.0.1)
 
 The site uses chess.js 1.4.0 for legal moves and game state. The build includes its BSD-2-Clause license. [chess.js source](https://github.com/jhlywa/chess.js/tree/v1.4.0)
+
+Book markers identify positions in the bundled Lichess opening catalog, including moves that reach the same position in a different order. The CC0 data snapshot and its source revision are in `data/openings/`. [Lichess chess-openings](https://github.com/lichess-org/chess-openings)

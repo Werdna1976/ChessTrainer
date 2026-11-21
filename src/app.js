@@ -2,6 +2,7 @@ import { Chess } from './vendor/chess.js';
 import { Engine, levels, uci, pieceNames, assess, explain, formatScore, boardLine, describeMove } from './engine.js';
 import { openings, challenges } from './content.js';
 import { boards, sets, pieceArt, loadAppearance, saveAppearance, playMoveSound } from './appearance.js';
+import { openingPositionKey } from './book.js';
 
 const $ = (id) => document.getElementById(id);
 const escape = (input) => String(input ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
@@ -47,6 +48,7 @@ let reviewId = library.current.id;
 let reviewPly = 0;
 let reviewRetry = null;
 let toast = '';
+let openingBook = {};
 
 function reconstruct(record, limit = record.moves.length) {
   const position = new Chess();
@@ -161,6 +163,10 @@ function resetExercise() {
   }
 }
 
+function activeCandidate() {
+  return proposal?.selectedOption || proposal;
+}
+
 function boardContext() {
   if (variation) {
     const move = variation.moves[variation.index - 1];
@@ -174,7 +180,8 @@ function boardContext() {
     return { position, last: position.history({ verbose: true }).at(-1) };
   }
   if (mode === 'play') {
-    if (proposal) return { position: new Chess(proposal.move.after), last: proposal.move, highlights: proposal.note?.highlights || [] };
+    const candidate = activeCandidate();
+    if (candidate) return { position: new Chess(candidate.move.after), last: candidate.move };
     return { position: game, last: game.history({ verbose: true }).at(-1) };
   }
   const hint = mode === 'openings' && hintOn && openings[openingIndex].moves[exerciseStep];
@@ -191,8 +198,15 @@ function canMove() {
 
 function renderBoard() {
   const { position, last, highlights = [] } = boardContext();
-  const legal = canMove() && selected ? position.moves({ square: selected, verbose: true }).map((move) => move.to) : [];
+  const interactive = canMove();
+  const legal = interactive && selected ? position.moves({ square: selected, verbose: true }).map((move) => move.to) : [];
   const board = position.board();
+  const original = mode === 'play' ? proposal?.move : null;
+  const originalSquares = original ? [original.from, original.to] : [];
+  const onOriginalMove = last && original && last.before === original.before && uci(last) === uci(original);
+  const lastSquares = last && !onOriginalMove ? [last.from, last.to] : [];
+  const inCheck = position.isCheck();
+  $('board-legend').hidden = !original;
   const coords = Array.from({ length: 8 }, (_, index) => index);
   const rows = facing === 'w' ? coords : [...coords].reverse();
   const cols = facing === 'w' ? coords : [...coords].reverse();
@@ -200,17 +214,23 @@ function renderBoard() {
   $('board').innerHTML = rows.map((row, i) => cols.map((col, j) => {
     const square = squares[col] + (8 - row);
     const piece = board[row][col];
+    const attacked = original && piece && position.isAttacked(square, piece.color === 'w' ? 'b' : 'w');
+    const threatened = attacked && piece.color === library.current.color;
+    const originalSquare = originalSquares.includes(square);
     const classes = [
       (row + col) % 2 ? 'dark' : 'light',
-      [last?.from, last?.to].includes(square) ? 'previous' : '',
+      lastSquares.includes(square) ? 'previous' : '',
       selected === square ? 'selected' : '',
       legal.includes(square) ? 'target' : '',
       highlights.includes(square) ? 'marked' : '',
-      piece?.type === 'k' && piece.color === position.turn() && position.isCheck() ? 'check' : '',
+      piece?.type === 'k' && piece.color === position.turn() && inCheck ? 'check' : '',
+      originalSquare ? 'original-square' : '',
+      attacked ? (threatened ? 'threatened' : 'attack-target') : '',
     ].join(' ');
-    const label = square + (piece ? ', ' + playerName(piece.color) + ' ' + pieceNames[piece.type] : ', empty');
+    const label = square + (piece ? ', ' + playerName(piece.color) + ' ' + pieceNames[piece.type] : ', empty')
+      + (attacked ? ', under attack' : '') + (originalSquare ? ', original move' : '');
     const pieceHtml = piece ? pieceArt(piece.type, piece.color, appearance.pieces) : '';
-    return '<button class="square ' + classes + '" data-square="' + square + '" draggable="' + Boolean(canMove() && piece?.color === position.turn()) + '" aria-label="' + label + '"' + (canMove() ? ' aria-pressed="' + (selected === square) + '"' : ' disabled') + '>'
+    return '<button class="square ' + classes + '" data-square="' + square + '" draggable="' + Boolean(interactive && piece?.color === position.turn()) + '" aria-label="' + label + '"' + (interactive ? ' aria-pressed="' + (selected === square) + '"' : ' disabled') + '>'
       + (j === 0 ? '<span class="coordinate rank">' + (8 - row) + '</span>' : '')
       + pieceHtml + (i === 7 ? '<span class="coordinate file">' + squares[col] + '</span>' : '') + '</button>';
   }).join('')).join('');
@@ -247,16 +267,33 @@ function render() {
   if (toast) $('details').insertAdjacentHTML('beforeend', '<p class="tip" role="status">' + escape(toast) + '</p>');
 }
 
+function bookEntry(move) {
+  return openingBook[openingPositionKey(move.after)];
+}
+
+function bookBadge(move) {
+  const entry = bookEntry(move);
+  if (!entry) return '';
+  const [eco, name] = entry;
+  return '<p class="book-detail"><span class="badge book">Book move</span>'
+    + (name ? ' <span>' + escape(name) + ' · ' + escape(eco) + '</span>' : '') + '</p>';
+}
+
 function moveList(list, notes = {}, active = -1) {
   if (!list.length) return '<p class="muted">Moves will appear here as you play.</p>';
-  const cells = list.map((move, index) => {
+  const rows = list.map((move, index) => {
     const grade = notes[index + 1]?.grade;
-    return '<button data-action="' + (mode === 'play' ? 'review-live' : 'review-ply') + '" data-value="' + (index + 1) + '" class="' + (index + 1 === active ? 'current' : '') + '" aria-label="' + escape(move.san + (grade ? ', ' + grade : '')) + '">' + escape(move.san)
-      + (grade ? '<span class="badge ' + gradeStyle(grade) + '" title="' + escape(grade) + '"></span>' : '') + '</button>';
+    const entry = bookEntry(move);
+    const [eco, name] = entry || [];
+    const book = entry ? '<span class="book-cell" title="' + escape(name ? name + ' · ' + eco : 'Book move') + '">'
+      + escape(name ? name.split(':')[0] : 'In book') + '</span>' : '';
+    return '<tr><td>' + (Math.floor(index / 2) + 1) + (index % 2 === 0 ? '.' : '…') + '</td><td>'
+      + '<button data-action="' + (mode === 'play' ? 'review-live' : 'review-ply') + '" data-value="' + (index + 1) + '" class="' + (index + 1 === active ? 'current' : '') + '" aria-label="'
+      + escape(playerName(move.color) + ' played ' + move.san + (grade ? ', ' + grade : '')) + '">' + escape(move.san)
+      + (grade ? '<span class="badge ' + gradeStyle(grade) + '" title="' + escape(grade) + '"></span>' : '') + '</button></td><td>' + book + '</td></tr>';
   });
-  let rows = '';
-  for (let i = 0; i < cells.length; i += 2) rows += '<div class="move-row"><span>' + (i / 2 + 1) + '.</span>' + cells[i] + (cells[i + 1] || '') + '</div>';
-  return '<div class="moves">' + rows + '</div>';
+  return '<div class="moves"><table aria-label="Moves and opening book"><thead><tr><th scope="col">Turn</th><th scope="col">Move</th><th scope="col">Book</th></tr></thead>'
+    + '<tbody>' + rows.join('') + '</tbody></table></div>';
 }
 
 function variationControls() {
@@ -275,29 +312,30 @@ function noteCopy(note) {
 }
 
 function renderPlay() {
+  const focusedCandidate = document.activeElement?.dataset.action === 'option' ? document.activeElement.dataset.value : null;
   const notes = library.current.notes;
-  const proposed = proposal?.move;
-  const note = proposal?.note;
+  const candidate = activeCandidate();
+  const proposed = candidate?.move;
+  const note = candidate?.note;
   let panel = '<p class="kicker">Position coach</p>';
   if (proposed) {
+    if (proposal.choices.length) {
+      panel += '<h2>Compare moves</h2><div class="lines candidates" role="group" aria-label="Moves to compare">';
+      for (const [index, option] of [proposal, ...proposal.choices].entries()) {
+        panel += '<button class="choice line' + (index === 0 ? ' original-candidate' : '') + '" data-action="option" data-value="' + index
+          + '" aria-pressed="' + (option === candidate) + '"><span><strong>' + escape(option.move.san) + '</strong>'
+          + '<small>' + (index === 0 ? 'Your original move' : 'Stockfish alternative') + '</small></span>'
+          + '<span class="badge">' + escape(formatScore(option.note?.line) || option.note?.grade || '') + '</span></button>';
+      }
+      panel += '</div>';
+    }
     panel += '<div class="card-head"><h2>' + escape(proposed.san) + '</h2>' + (note ? '<span class="badge ' + gradeStyle(note.grade) + '">' + escape(note.grade) + '</span>' : '') + '</div>';
+    panel += bookBadge(proposed);
     if (busy) panel += '<p class="muted" role="status">Stockfish is comparing your move with alternatives…</p>';
     else if (proposal.error) panel += '<p role="status">' + escape(proposal.error) + '</p>' + buttons(button('analyze', 'Retry analysis'));
     else if (note) {
       panel += noteCopy(note);
       if (!note.benefits.length && !note.risks.length) panel += '<p class="muted">Stockfish didn’t show a follow-up for this move.</p>';
-      if (proposal.choices.length) {
-        panel += '<h3>Compare alternatives</h3><div class="lines">';
-        for (const [i, option] of proposal.choices.entries()) {
-          panel += '<button class="choice line" data-action="option" data-value="' + i + '"><span>' + escape(option.move.san) + '<small>' + escape(option.summary) + '</small></span><span class="badge">' + escape(formatScore(option.line)) + '</span></button>';
-        }
-        panel += '</div>';
-      }
-      if (variation?.option) {
-        const other = variation.option;
-        panel += '<h3>' + escape(other.move.san) + '</h3>' + noteCopy(other.note);
-        panel += buttons(button('commit-option', 'Play ' + other.move.san, 'secondary', other.index));
-      }
       if (note.line?.moves.length > 1 && !variation) panel += buttons(button('proposal-line', 'Show opponent’s reply on the board'));
     }
     if (variation) panel += variationControls();
@@ -313,6 +351,7 @@ function renderPlay() {
       + (game.isCheck() ? 'Look for a capture, a block, or a safe square for your king.' : 'Check what your opponent is attacking. After a trade, look one move farther and see who can recapture.') + '</p></div>';
   }
   $('panel').innerHTML = panel;
+  if (focusedCandidate !== null) $('panel').querySelector('[data-action="option"][data-value="' + focusedCandidate + '"]')?.focus({ preventScroll: true });
   const list = game.history({ verbose: true });
   const latest = Object.entries(notes).at(-1);
   const quality = latest ? '<div class="move-quality"><span>' + escape(list[Number(latest[0]) - 1].san)
@@ -366,6 +405,7 @@ function renderReview() {
   if (played) {
     copy += '<div class="card-head"><h2>' + Math.ceil(reviewPly / 2) + (played.color === 'w' ? '. ' : '… ') + escape(played.san) + '</h2>'
       + (note ? '<span class="badge ' + gradeStyle(note.grade) + '">' + escape(note.grade) + '</span>' : '') + '</div>';
+    copy += bookBadge(played);
     copy += note ? noteCopy(note) || '<p class="muted">Explore the engine line to see what follows.</p>' : '<p class="muted">' + playerName(played.color) + ' played ' + escape(played.san) + '.</p>';
     if (note && !variation) copy += buttons((note.line?.moves.length > 1 ? button('review-line', 'Show opponent’s reply', 'secondary', 'line') : '')
       + (note.best && note.best.moves[0] !== uci(played) ? button('review-line', 'See alternative', 'secondary', 'best') : '')
@@ -414,7 +454,7 @@ function renderReview() {
 }
 
 function prepareProposal(move) {
-  proposal = { move, note: null, choices: [], error: '' };
+  proposal = { move, note: null, choices: [], selectedOption: null, error: '' };
   selected = '';
   void analyzeProposal();
 }
@@ -446,15 +486,18 @@ async function analyzeProposal() {
     const { note, candidates } = await evaluateMove(move, library.current.moves.slice());
     if (proposal !== target) return;
     target.note = note;
-    target.choices = candidates.filter((line) => line.moves[0] !== uci(move)).slice(0, 2).flatMap((line) => {
+    const seen = new Set([uci(move)]);
+    target.choices = candidates.flatMap((line) => {
+      if (seen.has(line.moves[0])) return [];
       const first = boardLine(move.before, line.moves)[0];
       if (!first) return [];
+      seen.add(line.moves[0]);
       const explanation = explain(first, line);
       return [{
-        move: first, line, summary: explanation.benefits[0] || ('Look at the reply' + (line.moves[1] ? ' and follow-up.' : '.')),
+        move: first,
         note: { ...explanation, grade: assess(line, note.best, first.san.endsWith('#')), line, best: note.best },
       }];
-    });
+    }).slice(0, 2);
     announce(move.san + '. ' + target.note.grade + '.');
   } catch {
     if (proposal === target) {
@@ -469,9 +512,9 @@ async function analyzeProposal() {
   }
 }
 
-function commit(option) {
+function commit() {
   if (!proposal) return;
-  const { move, note } = option || proposal;
+  const { move, note } = activeCandidate();
   const recorded = game.move(uci(move));
   soundFor(recorded);
   library.current.moves.push(uci(recorded));
@@ -604,11 +647,11 @@ function chooseSquare(square) {
   renderBoard();
 }
 
-function openVariation(fen, line, { option, index = 1 } = {}) {
+function openVariation(fen, line, { index = 1 } = {}) {
   if (!line) return;
   const moves = boardLine(fen, line.moves);
   if (!moves.length) return;
-  variation = { fen, moves, index: Math.min(index, moves.length), option };
+  variation = { fen, moves, index: Math.min(index, moves.length) };
 }
 
 function download(filename, mime, content) {
@@ -677,13 +720,16 @@ const actions = {
   cancel() { clearProposal(); },
   analyze() { void analyzeProposal(); },
   commit() { commit(); },
-  'commit-option'(index) { if (proposal?.choices[index]) commit(proposal.choices[index]); },
   'opponent-retry'() { void playOpponent(); },
   option(index) {
-    const option = proposal?.choices[index];
-    if (option) openVariation(option.move.before, option.line, { option: { ...option, index } });
+    if (!proposal) return;
+    proposal.selectedOption = proposal.choices[Number(index) - 1] || null;
+    variation = null;
   },
-  'proposal-line'() { openVariation(proposal.move.before, proposal.note.line, { index: 2 }); },
+  'proposal-line'() {
+    const { move, note } = activeCandidate();
+    openVariation(move.before, note.line, { index: 2 });
+  },
   'line-step'(index) { if (variation) variation.index = Math.max(0, Math.min(Number(index), variation.moves.length)); },
   'close-line'() { variation = null; },
   hint() { hintOn = !hintOn; },
@@ -815,7 +861,7 @@ $('appearance').addEventListener('click', appearanceDialog);
 $('backup').addEventListener('click', backupDialog);
 $('credits').addEventListener('click', () => {
   dialog('<h2>Engine &amp; licenses</h2><p>Stockfish 19 Lite evaluates positions in this browser. Move labels reflect a short search and can change with deeper analysis.</p>'
-    + '<p class="tip"><a href="https://github.com/nmrugg/stockfish.js/tree/v19.0.1">Stockfish.js 19.0.1 source and build instructions</a><br><a href="./vendor/stockfish-LICENSE.txt">Stockfish GPLv3 license</a><br><a href="./vendor/chess-js-LICENSE.txt">chess.js BSD license</a></p>'
+    + '<p class="tip"><a href="https://github.com/nmrugg/stockfish.js/tree/v19.0.1">Stockfish.js 19.0.1 source and build instructions</a><br><a href="./vendor/stockfish-LICENSE.txt">Stockfish GPLv3 license</a><br><a href="./vendor/chess-js-LICENSE.txt">chess.js BSD license</a><br><a href="https://github.com/lichess-org/chess-openings">Lichess opening catalog</a> · <a href="./vendor/chess-openings-LICENSE.txt">CC0 license</a></p>'
     + buttons(button('dismiss', 'Close')));
 });
 $('header-action').addEventListener('click', () => {
@@ -834,3 +880,11 @@ window.addEventListener('keydown', (event) => {
 
 enterMode(location.hash.slice(1));
 void playOpponent();
+fetch(new URL('./opening-book.json', import.meta.url))
+  .then((response) => response.ok ? response.json() : {})
+  .then((positions) => {
+    openingBook = positions;
+    if (mode === 'play') renderPlay();
+    if (mode === 'review') renderReview();
+  })
+  .catch(() => {});
