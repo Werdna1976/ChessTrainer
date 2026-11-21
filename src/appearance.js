@@ -47,12 +47,13 @@ export function pieceArt(type, color, style) {
 
 const preferencesKey = 'chess-trainer-appearance';
 export function loadAppearance() {
-  const defaults = { board: 'slate', pieces: 'porcelain', sound: true };
+  const defaults = { board: 'slate', pieces: 'porcelain', sound: true, theme: 'light' };
   try {
     const saved = JSON.parse(localStorage.getItem(preferencesKey));
     if (boards.some(({ id }) => id === saved?.board)) defaults.board = saved.board;
     if (sets.some(({ id }) => id === saved?.pieces)) defaults.pieces = saved.pieces;
     if (typeof saved?.sound === 'boolean') defaults.sound = saved.sound;
+    if (saved?.theme === 'dark') defaults.theme = saved.theme;
   } catch {}
   return defaults;
 }

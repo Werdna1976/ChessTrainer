@@ -15,6 +15,7 @@ const storeKey = 'quiet-square-v1';
 const appearance = loadAppearance();
 document.documentElement.dataset.board = appearance.board;
 document.documentElement.dataset.pieces = appearance.pieces;
+applyTheme();
 const engine = new Engine();
 const modes = {
   play: ['Coach & play', 'Explore a move before you commit to it.', 'New game'],
@@ -96,6 +97,11 @@ function announce(message) { $('announcement').textContent = message; }
 function getReview() { return [library.current, ...library.archive].find((record) => record.id === reviewId) || library.current; }
 function playerTurn() { return !game.isGameOver() && game.turn() === library.current.color; }
 function engineLevel() { return levels.find((level) => level.id === library.current.level); }
+function applyTheme() {
+  document.documentElement.dataset.theme = appearance.theme;
+  $('theme-toggle').setAttribute('aria-pressed', String(appearance.theme === 'dark'));
+}
+
 function soundFor(move, delay = 0) {
   if (appearance.sound) void playMoveSound(move, delay);
 }
@@ -807,6 +813,11 @@ $('board').addEventListener('drop', (event) => {
 });
 $('flip').addEventListener('click', () => { facing = facing === 'w' ? 'b' : 'w'; renderBoard(); });
 $('appearance').addEventListener('click', appearanceDialog);
+$('theme-toggle').addEventListener('click', () => {
+  appearance.theme = appearance.theme === 'dark' ? 'light' : 'dark';
+  applyTheme();
+  saveAppearance(appearance);
+});
 $('backup').addEventListener('click', backupDialog);
 $('credits').addEventListener('click', () => {
   dialog('<h2>Engine &amp; licenses</h2><p>Stockfish 19 Lite evaluates positions in this browser. Move labels reflect a short search and can change with deeper analysis.</p>'
