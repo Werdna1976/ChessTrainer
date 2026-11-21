@@ -39,12 +39,14 @@ async function versionedPath(file) {
   return './' + file + '?v=' + version;
 }
 
-const enginePath = await versionedPath('engine.js');
-const review = await readFile('dist/review.js', 'utf8');
-await writeFile('dist/review.js', review.replace("'./engine.js'", "'" + enginePath + "'"));
-const app = await readFile('dist/app.js', 'utf8');
-await writeFile('dist/app.js', app.replace("'./engine.js'", "'" + enginePath + "'")
-  .replace("'./review.js'", "'" + await versionedPath('review.js') + "'"));
+const modules = new Map();
+for (const file of ['engine.js', 'appearance.js', 'book.js', 'content.js', 'training.js', 'progress.js', 'review.js', 'training-ui.js', 'app.js']) {
+  const source = await readFile('dist/' + file, 'utf8');
+  const linked = source.replace(/from '\.\/([\w-]+\.js)'/g, (match, dependency) =>
+    modules.has(dependency) ? "from '" + modules.get(dependency) + "'" : match);
+  if (linked !== source) await writeFile('dist/' + file, linked);
+  modules.set(file, await versionedPath(file));
+}
 
 let html = await readFile('dist/index.html', 'utf8');
 for (const file of ['styles.css', 'theme.js', 'app.js']) {

@@ -46,13 +46,21 @@ export function pieceArt(type, color, style) {
 }
 
 const preferencesKey = 'chess-trainer-appearance';
+export const soundProfiles = [
+  { id: 'walnut', name: 'Walnut', pitch: 284, ring: 2.81, decay: 48, texture: .32 },
+  { id: 'marble', name: 'Marble', pitch: 418, ring: 2.54, decay: 37, texture: .23 },
+  { id: 'felt', name: 'Soft felt', pitch: 189, ring: 2.16, decay: 72, texture: .12 },
+];
+
 export function loadAppearance() {
-  const defaults = { board: 'slate', pieces: 'porcelain', sound: true };
+  const defaults = { board: 'slate', pieces: 'porcelain', sound: true, soundProfile: 'walnut', volume: 65 };
   try {
     const saved = JSON.parse(localStorage.getItem(preferencesKey));
     if (boards.some(({ id }) => id === saved?.board)) defaults.board = saved.board;
     if (sets.some(({ id }) => id === saved?.pieces)) defaults.pieces = saved.pieces;
     if (typeof saved?.sound === 'boolean') defaults.sound = saved.sound;
+    if (soundProfiles.some(({ id }) => id === saved?.soundProfile)) defaults.soundProfile = saved.soundProfile;
+    if (Number.isFinite(saved?.volume)) defaults.volume = Math.min(100, Math.max(0, saved.volume));
   } catch {}
   return defaults;
 }
@@ -63,38 +71,49 @@ export function saveAppearance(preferences) {
 }
 
 let audio;
-let samples;
+const samples = new Map();
 
-function woodSample(context, capture) {
-  const duration = capture ? .15 : .11;
+function soundSample(context, profile, kind) {
+  const duration = { move: .105, capture: .145, check: .19, 'capture-check': .205, success: .34, mate: .31 }[kind];
   const length = Math.ceil(context.sampleRate * duration);
   const buffer = context.createBuffer(1, length, context.sampleRate);
   const data = buffer.getChannelData(0);
   let previousNoise = 0;
+  const hit = (t, frequency, decay) => t < 0 ? 0 : Math.sin(2 * Math.PI * frequency * t) * Math.exp(-t * decay) * Math.min(t * 1250, 1);
+  const captured = kind.startsWith('capture');
+  const fundamental = profile.pitch * (captured ? .76 : 1);
   for (let i = 0; i < length; i++) {
     const t = i / context.sampleRate;
     const noise = Math.random() * 2 - 1;
     previousNoise = (previousNoise + noise * .35) / 1.35;
-    const impact = (.33 * noise + .28 * previousNoise) * Math.exp(-t * 155);
-    const low = capture ? 218 : 287;
-    const resonance = .45 * Math.sin(2 * Math.PI * low * t) * Math.exp(-t * 57)
-      + .18 * Math.sin(2 * Math.PI * low * 2.81 * t) * Math.exp(-t * 92);
-    data[i] = (impact + resonance) * Math.min(t * 1800, 1) * (1 - t / duration);
+    const impact = profile.texture * (.63 * noise + .37 * previousNoise) * Math.exp(-t * 150) * Math.min(t * 1900, 1);
+    const body = .48 * hit(t, fundamental, profile.decay) + .17 * hit(t, fundamental * profile.ring, profile.decay * 1.45);
+    const contact = captured ? .23 * hit(t - .023, fundamental * .82, profile.decay * .98) : 0;
+    const check = kind.endsWith('check') ? .16 * hit(t - .055, 540, 27) + .10 * hit(t - .074, 680, 32) : 0;
+    const chord = .23 * hit(t, kind === 'mate' ? 440 : 523.25, 19)
+      + .18 * hit(t - .075, kind === 'mate' ? 554.37 : 659.25, 21)
+      + .15 * hit(t - .15, kind === 'mate' ? 659.25 : 783.99, 25);
+    data[i] = (kind === 'success' || kind === 'mate' ? chord : impact + body + contact + check) * (1 - t / duration);
   }
   return buffer;
 }
 
-export async function playMoveSound({ captured } = {}, delay = 0) {
+export async function playMoveSound(move = {}, delay = 0, profileId = 'walnut', loudness = 65) {
   try {
+    if (!loudness) return;
     const Audio = window.AudioContext || window.webkitAudioContext;
     if (!Audio) return;
     audio ??= new Audio();
     if (audio.state === 'suspended') await audio.resume();
-    samples ??= [woodSample(audio, false), woodSample(audio, true)];
+    const profile = soundProfiles.find(({ id }) => id === profileId) || soundProfiles[0];
+    const kind = move.success ? 'success' : move.san?.endsWith('#') ? 'mate'
+      : move.san?.endsWith('+') ? move.captured ? 'capture-check' : 'check' : move.captured ? 'capture' : 'move';
+    const key = profile.id + ':' + kind;
+    if (!samples.has(key)) samples.set(key, soundSample(audio, profile, kind));
     const source = audio.createBufferSource();
     const volume = audio.createGain();
-    source.buffer = samples[Number(Boolean(captured))];
-    volume.gain.value = .42;
+    source.buffer = samples.get(key);
+    volume.gain.value = .64 * loudness / 100;
     source.connect(volume).connect(audio.destination);
     source.start(audio.currentTime + delay);
   } catch {}

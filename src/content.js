@@ -26,6 +26,76 @@ export const challenges = [
     follow: 'The black king has stepped to h7. Find the queen check on the same file.',
     takeaway: 'A threat is forced when every legal reply still lets you deliver mate.',
   },
+  {
+    name: 'A knight in a phone booth', type: 'Mate in one', topic: 'safety', difficulty: 'Foundations',
+    fen: '6rk/6pp/7N/8/8/8/8/6K1 w - - 0 1', solutions: ['Nf7#'], mate: 1,
+    hint: 'A knight can give check over the pieces that block the king’s escape.', takeaway: 'The knight jumps to f7 and checks h8. Black’s own pieces box in the king.',
+  },
+  {
+    name: 'Black strikes first', type: 'Mate in one', topic: 'safety', difficulty: 'Foundations',
+    fen: '4r1k1/8/8/8/8/8/5PPP/6K1 b - - 0 1', solutions: ['Re1#'], mate: 1,
+    hint: 'Look for an open file that gives your rook access to White’s back rank.', takeaway: 'The black rook lands on e1. The white king has no escape through its own pawns.',
+  },
+  {
+    name: 'Check from c2', type: 'Knight fork', topic: 'tactics', difficulty: 'Developing',
+    fen: '4k3/ppp2ppp/8/8/3n4/7P/5PP1/Q3K3 b - - 0 1', solutions: ['Nc2+'], reply: 'Kd2', finish: ['Nxa1'],
+    hint: 'Look for a knight move that attacks both e1 and a1.', follow: 'The king left e1. Which target can you take now?',
+    takeaway: 'A check lets you win the second target before it can move away.',
+  },
+  {
+    name: 'Small pawn, big fork', type: 'Pawn fork', topic: 'tactics', difficulty: 'Developing',
+    fen: '4k3/8/2n1r3/8/3P4/8/4P3/4K3 w - - 0 1', solutions: ['d5'],
+    prompt: 'Move the pawn so it attacks both the knight and the rook.', hint: 'Pawns attack diagonally ahead, including when the pawn moves straight ahead.',
+    takeaway: 'On d5 one pawn attacks c6 and e6 at the same time.',
+  },
+  {
+    name: 'Two diagonals at once', type: 'Bishop fork', topic: 'tactics', difficulty: 'Developing',
+    fen: '6k1/1r5q/8/8/8/3P1B2/8/6K1 w - - 0 1', solutions: ['Be4'],
+    prompt: 'Attack the queen and rook with one bishop move. Make sure your pawn protects the bishop.', hint: 'Trace the diagonals from b7 and h7 until they meet.',
+    takeaway: 'On e4 the bishop attacks both pieces. The pawn on d3 guards it if the queen tries to capture.',
+  },
+  {
+    name: 'A rook behind the king', type: 'Skewer', topic: 'tactics', difficulty: 'Developing',
+    fen: '1r6/1k6/8/8/8/8/8/2R4K w - - 0 1', solutions: ['Rb1+'], reply: 'Ka6', finish: ['Rxb8'],
+    hint: 'Put your rook on the line shared by both black pieces.', follow: 'The king is off the b-file. What did it leave behind?',
+    takeaway: 'When the king steps out of a line, check which piece behind it is exposed.',
+  },
+  {
+    name: 'An escape on h2', type: 'Prevent mate', topic: 'safety', difficulty: 'Developing',
+    fen: '4r1k1/5ppp/8/8/8/8/R4PPP/6K1 w - - 0 1', solutions: ['h3', 'h4'], reply: 'Re1+', finish: ['Kh2'],
+    prompt: 'Make an escape square for the king on the h-file.', hint: 'Black’s rook threatens to land on e1. Which pawn can clear h2?',
+    follow: 'Black gave check on e1. Use the square you created.', takeaway: 'An escape square turns a back-rank mate into a check you can answer.',
+  },
+  {
+    name: 'Clear the line to the king', type: 'Break a pin', topic: 'defense', difficulty: 'Developing',
+    fen: '2b1k3/8/2n5/1B6/8/8/8/4K3 b - - 1 1', solutions: ['Bd7'],
+    prompt: 'Free the pinned knight by putting your bishop behind it.', hint: 'On d7 the bishop blocks the diagonal to the king.',
+    takeaway: 'You can break a pin without moving the pinned piece.',
+  },
+  {
+    name: 'Catch the runaway pawn', type: 'Stop promotion', topic: 'endgame', difficulty: 'Foundations',
+    fen: '8/5k2/8/8/7p/8/7R/6K1 w - - 0 1', solutions: ['Rxh4'],
+    prompt: 'Remove Black’s passed pawn before it gets any farther.', hint: 'Your rook has a clear path up the h-file.',
+    takeaway: 'A rook can attack a passed pawn from behind, where it can follow it along the file.',
+  },
+  {
+    name: 'Leave the king one square', type: 'Avoid stalemate', topic: 'endgame', difficulty: 'Developing',
+    fen: '8/k1P5/2K5/8/8/8/8/8 w - - 0 1', solutions: ['c8=R'],
+    prompt: 'Promote to a piece that can mate with your king while leaving a6 open.', hint: 'A queen controls a6 diagonally from c8. A rook doesn’t.',
+    takeaway: 'A rook promotion keeps the game going in a winning king-and-rook endgame.',
+  },
+  {
+    name: 'A queen with tempo', type: 'Promote with check', topic: 'endgame', difficulty: 'Foundations',
+    fen: '4k3/P7/8/8/8/8/8/6K1 w - - 0 1', solutions: ['a8=Q+'],
+    prompt: 'Promote to a queen and give check in the same move.', hint: 'The opposing king is on the promotion rank, and there are no pieces between it and a8.',
+    takeaway: 'A promotion that gives check forces the opponent to respond before doing anything else.',
+  },
+  {
+    name: 'The bishop takes charge', type: 'Save a loose piece', topic: 'defense', difficulty: 'Developing',
+    fen: '4k3/8/4r3/8/2B1N3/8/4P3/4K3 w - - 0 1', solutions: ['Bxe6'],
+    prompt: 'Save the knight by taking the piece that attacks it.', hint: 'A bishop on c4 can reach e6 in one diagonal move.',
+    takeaway: 'Taking the attacker can solve a defensive problem and win material in one move.',
+  },
 ];
 
 export const openings = [
@@ -56,5 +126,33 @@ export const openings = [
     moves: ['e4', 'e5', 'Nf3', 'Nc6', 'Bc4', 'Bc5', 'd3', 'Nf6', 'O-O', 'd6', 'c3'],
     prompts: ['Claim the center and open the bishop’s diagonal.', 'Develop and put pressure on the e5-pawn.', 'Aim a bishop at f7, which Black’s king alone defends.', 'Support e4 and open a diagonal for your other bishop.', 'Bring your king to safety while your position is ready for it.', 'Prepare d4 by giving your d-pawn another supporter.'],
     recap: 'You have a safe king and a bishop aimed at f7. The c3-pawn helps you prepare d4 when the time is right.',
+  },
+  {
+    name: 'Caro-Kann Defense', variation: 'Advance variation', color: 'b',
+    idea: 'Challenge the center and develop the light-squared bishop before closing its diagonal.',
+    moves: ['e4', 'c6', 'd4', 'd5', 'e5', 'Bf5', 'Nf3', 'e6', 'Be2', 'c5'],
+    prompts: ['Use the c-pawn to prepare a challenge on d5.', 'Strike at White’s e4-pawn with d5.', 'Develop the bishop along the open diagonal while you can.', 'With your bishop developed, reinforce the center and open the other bishop’s diagonal.', 'Challenge the d4-pawn at the base of White’s chain.'],
+    recap: 'Your light-squared bishop is already out. The pawn break on c5 gives you counterplay against White’s larger center.',
+  },
+  {
+    name: 'Queen’s Gambit Declined', variation: 'Classical setup', color: 'w',
+    idea: 'Pressure d5 and develop before choosing when to change the center.',
+    moves: ['d4', 'd5', 'c4', 'e6', 'Nc3', 'Nf6', 'Bg5', 'Be7', 'e3', 'O-O', 'Nf3'],
+    prompts: ['Claim central space with your queen’s pawn.', 'Use a flank pawn to challenge d5.', 'Develop the queenside knight and add pressure to d5.', 'Develop the bishop and line it up with Black’s knight and queen.', 'Support d4 and free your other bishop.', 'Develop the last knight and prepare to castle.'],
+    recap: 'Both sides have a pawn on the d-file. Your pieces are ready to support a central trade or develop into a solid middlegame.',
+  },
+  {
+    name: 'Ruy Lopez', variation: 'Closed setup', color: 'w',
+    idea: 'Put pressure on the knight that defends e5, then castle and support your center.',
+    moves: ['e4', 'e5', 'Nf3', 'Nc6', 'Bb5', 'a6', 'Ba4', 'Nf6', 'O-O', 'Be7', 'Re1'],
+    prompts: ['Claim central space and open a bishop diagonal.', 'Use the knight to attack e5.', 'Develop the bishop so it attacks the knight that guards e5.', 'Keep the bishop working along the same diagonal.', 'Bring your king to safety.', 'Use the rook to support the pawn on e4.'],
+    recap: 'The bishop still looks toward c6, and your rook backs e4. Focus on completing development before opening the center.',
+  },
+  {
+    name: 'King’s Indian Defense', variation: 'Classical setup', color: 'b',
+    idea: 'Let White build a center while you develop and prepare to challenge it.',
+    moves: ['d4', 'Nf6', 'c4', 'g6', 'Nc3', 'Bg7', 'e4', 'd6', 'Nf3', 'O-O', 'Be2', 'e5'],
+    prompts: ['Develop and control e4 with the knight.', 'Open a long diagonal for the kingside bishop.', 'Put the bishop on the long diagonal.', 'Control e5 and prepare a central challenge.', 'Secure your king first.', 'Use the e-pawn to challenge the d4-pawn.'],
+    recap: 'Your king is safe and your pieces are in place. White has more space, so look for well-timed pawn breaks that give your pieces room.',
   },
 ];

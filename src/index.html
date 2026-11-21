@@ -14,6 +14,7 @@
       <a class="brand" href="#play"><span class="brand-mark" aria-hidden="true">♞</span>Chess Trainer</a>
       <nav aria-label="Training">
         <a href="#play" data-mode="play">Coach &amp; play</a>
+        <a href="#training" data-mode="training">Training Room</a>
         <a href="#challenges" data-mode="challenges">Challenges</a>
         <a href="#openings" data-mode="openings">Openings</a>
         <a href="#review" data-mode="review">Game review</a>
@@ -37,6 +38,7 @@
     <header class="page-header">
       <div><h1 id="title">Coach &amp; play</h1><p id="subtitle">Explore a move before you commit to it.</p></div>
       <div class="header-controls">
+        <button id="import-pgn" class="secondary" hidden>Import PGN</button>
         <div class="difficulty" id="difficulty-control">
           <div class="difficulty-heading"><label for="difficulty">Opponent difficulty</label><span id="difficulty-level"></span></div>
           <input id="difficulty" type="range" min="0" max="3" step="1" value="1">
@@ -45,6 +47,7 @@
         <button id="header-action" class="secondary">New game</button>
       </div>
     </header>
+    <div id="training-room" hidden></div>
     <section id="review-story" class="review-story card" aria-label="Game story" hidden></section>
     <div id="workspace" class="workspace">
       <section class="board-area" aria-label="Chess position">

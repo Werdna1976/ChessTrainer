@@ -2,9 +2,11 @@
 
 Play either side against Stockfish at four difficulty settings using the slider above the board. Preview your move, compare replies and alternatives, and then make the final call yourself.
 
-Open **Appearance** to mix and match board palettes and piece sets or mute the move sounds. These settings are saved in your browser.
+Open **Appearance** to mix and match board palettes and piece sets, choose a move sound profile, or set the volume. These settings are saved in your browser.
 
-The review board follows the opening, middlegame, and endgame, with jump points for turning points, attacks, defenses, and plans observed on the board. It preserves the coach’s notes and your original proposal when you play a different move. You can compare the lines or retry a position from your game. The training library includes four puzzles and practice lines for the French Defense, Sicilian Defense, London System, and Italian Game.
+**Training Room** includes eight guided lessons, sixteen challenges, and a local practice log. Demonstrations, two-step hints, and board arrows cover forks, pins, king safety, stalemate, and promotion. Completed exercises return for review over time, and the room can suggest a lesson or a position from your recent mistakes.
+
+The review board follows the opening, middlegame, and endgame, with jump points for turning points, attacks, defenses, and plans observed on the board. It preserves the coach’s notes and your original proposal when you play a different move. Save a position for practice or import a single standard-start PGN to review a game played elsewhere. There are eight opening trainers, including the French, Sicilian, Caro-Kann, and King’s Indian.
 
 Use the move tracker to click a move, scrub the timeline, or step with the left and right arrow keys. **Live** returns to the current position in Coach & Play. The **Change** column compares Stockfish’s estimate for the move played with its estimate before the move, from the perspective of the side that moved. Use **Analyze game** to fill in missing scores from older games.
 
